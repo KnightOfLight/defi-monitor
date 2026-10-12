@@ -1,0 +1,77 @@
+name: Weekly digest (Fri 10:00 Kyiv) + Sat reminder
+
+on:
+  schedule:
+    # 07:00 і 08:00 UTC у п'ятницю та суботу = 10:00 за Києвом влітку (UTC+3) і взимку (UTC+2).
+    # Код сам обирає запуск, що припадає на 10:xx за Києвом; інший завершується без дій.
+    - cron: "0 7,8 * * 5,6"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Примусово: digest (дайджест зараз) або reminder (нагадування зараз)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: defi-monitor-state
+  cancel-in-progress: false
+
+env:
+  HAS_DATA_REPO: ${{ secrets.DATA_REPO_TOKEN != '' }}
+
+jobs:
+  weekly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Safety check (public repo must keep data in a private repo)
+        if: env.HAS_DATA_REPO != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$(gh api repos/$GITHUB_REPOSITORY --jq .private)" != "true" ]; then
+            echo "::error::Репозиторій публічний, а секрети DATA_REPO / DATA_REPO_TOKEN не задані — журнал потрапив би у відкритий доступ. Додайте секрети (README, крок 7) або зробіть репозиторій приватним."
+            exit 1
+          fi
+
+      - name: Checkout private data repo
+        if: env.HAS_DATA_REPO == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.DATA_REPO }}
+          token: ${{ secrets.DATA_REPO_TOKEN }}
+          path: data
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -q -r requirements.txt
+
+      - name: Run weekly
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ETH_RPC_URL: ${{ secrets.ETH_RPC_URL }}
+          BSC_RPC_URL: ${{ secrets.BSC_RPC_URL }}
+        run: python -m bot.run weekly --force "${{ github.event.inputs.force }}"
+
+      - name: Commit state
+        if: always()
+        run: |
+          git config --global user.name "defi-monitor-bot"
+          git config --global user.email "defi-monitor-bot@users.noreply.github.com"
+          if [ "$HAS_DATA_REPO" = "true" ]; then
+            cd data && git add -A .
+          else
+            mkdir -p data && git add data/
+          fi
+          if git diff --cached --quiet; then echo "no changes"; exit 0; fi
+          git commit -q -m "weekly: $(date -u +'%Y-%m-%d %H:%M UTC')"
+          for i in 1 2 3; do git pull -q --rebase && git push -q && break || sleep 5; done
