@@ -1,8 +1,8 @@
-name: Monitor (every 30 min)
+name: Monitor (every 15 min)
 
 on:
   schedule:
-    - cron: "*/30 * * * *"      # приватне репо: ≈1 500 хв/міс; публічне репо: хвилини безлімітні, можна "*/15"
+    - cron: "*/15 * * * *"      # приватне репо: ≈1 500 хв/міс; публічне репо: хвилини безлімітні, можна "*/15"
   workflow_dispatch:
 
 permissions:
