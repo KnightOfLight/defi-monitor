@@ -1,0 +1,72 @@
+name: Monitor (every 30 min)
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"      # приватне репо: ≈1 500 хв/міс; публічне репо: хвилини безлімітні, можна "*/15"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: defi-monitor-state     # monitor і weekly ніколи не пишуть стан одночасно
+  cancel-in-progress: false
+
+env:
+  # Режим «публічний код + приватні дані»: якщо задано секрет DATA_REPO_TOKEN,
+  # журнал/стан живуть у приватному репозиторії DATA_REPO, а не тут.
+  HAS_DATA_REPO: ${{ secrets.DATA_REPO_TOKEN != '' }}
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Safety check (public repo must keep data in a private repo)
+        if: env.HAS_DATA_REPO != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$(gh api repos/$GITHUB_REPOSITORY --jq .private)" != "true" ]; then
+            echo "::error::Репозиторій публічний, а секрети DATA_REPO / DATA_REPO_TOKEN не задані — журнал потрапив би у відкритий доступ. Додайте секрети (README, крок 7) або зробіть репозиторій приватним."
+            exit 1
+          fi
+
+      - name: Checkout private data repo
+        if: env.HAS_DATA_REPO == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.DATA_REPO }}
+          token: ${{ secrets.DATA_REPO_TOKEN }}
+          path: data
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -q -r requirements.txt
+
+      - name: Run monitor
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ETH_RPC_URL: ${{ secrets.ETH_RPC_URL }}
+          BSC_RPC_URL: ${{ secrets.BSC_RPC_URL }}
+        run: python -m bot.run monitor
+
+      - name: Commit state
+        if: always()
+        run: |
+          git config --global user.name "defi-monitor-bot"
+          git config --global user.email "defi-monitor-bot@users.noreply.github.com"
+          if [ "$HAS_DATA_REPO" = "true" ]; then
+            cd data && git add -A .
+          else
+            mkdir -p data && git add data/
+          fi
+          if git diff --cached --quiet; then echo "no changes"; exit 0; fi
+          git commit -q -m "state: $(date -u +'%Y-%m-%d %H:%M UTC')"
+          for i in 1 2 3; do git pull -q --rebase && git push -q && break || sleep 5; done
