@@ -1,0 +1,94 @@
+# ============================================================
+#  config.yaml — усі пороги й адреси. Код правити не потрібно.
+#  Секрети (токен бота, chat id, RPC) сюди НЕ пишіть — вони в GitHub Secrets.
+# ============================================================
+
+timezone: Europe/Kyiv
+
+# --- П'ятничний дайджест і суботнє нагадування -------------------------------
+weekly:
+  weekday: 4            # 0 = понеділок … 4 = п'ятниця
+  hour: 10              # година за Києвом (воркфлоу запускається о 07:00 і 08:00 UTC,
+                        # код сам обирає той запуск, що припадає на 10:xx за Києвом)
+  reminder_weekday: 5   # субота: нагадати, якщо поінти не записані
+
+# --- Алерти -------------------------------------------------------------------
+alerts:
+  repeat_hours: 6       # повтор алерту, поки умова тримається
+  warmup_days: 7        # перші N днів збираємо базу, алерти шлемо лише по цінах
+  warmup_suppress: [tvl, curve_pool, infinifi]   # що глушити під час warm-up
+  source_error_runs: 3  # повідомити, якщо джерело не відповідає N запусків поспіль
+
+  price:
+    warn_below: 0.995         # «увага» (на двох перевірках поспіль)
+    warn_consecutive: 2
+    alarm_below:              # «тривога» — одразу
+      usdat: 0.985
+      usdu: 0.98
+      iusd: 0.985
+
+  tvl:
+    warn_drop_7d_pct: 20      # увага: −20% за 7 днів
+    alarm_drop_24h_pct: 30    # тривога: −30% за 24 години
+    saturn_high_usd: 800000000  # окреме повідомлення, коли TVL Saturn > $800 млн
+
+  curve_pool:
+    usdat_share_warn_pct: 70
+    usdat_share_alarm_pct: 80
+    liquidity_drop_7d_warn_pct: 30
+
+  infinifi:
+    reserve_warn_pct: 5       # ліквідний резерв < 5% TVL …
+    reserve_warn_days: 3      # … три дні поспіль → увага
+    queue_alarm_hours: 48     # черга redemption не порожня понад 48 год → тривога
+    rate_drop_tolerance: 0.000001   # відносний допуск при порівнянні exchange rate
+
+# --- Джерела даних ------------------------------------------------------------
+sources:
+  defillama:
+    base_url: https://api.llama.fi
+    slugs:                    # перевірено 09.10.2026 на defillama.com/protocol/<slug>
+      saturn: saturn
+      unitas: unitas-usdu     # дочірній протокол «Unitas USDu»; батьківський (BSC+Solana разом) — unitas
+      infinifi: infinifi
+
+  rpc:
+    # Публічні RPC за замовчуванням. Якщо задати секрети ETH_RPC_URL / BSC_RPC_URL,
+    # вони стануть першими в списку (решта — резерв).
+    ethereum:
+      - https://ethereum-rpc.publicnode.com
+      - https://eth.llamarpc.com
+    bsc:
+      - https://bsc-rpc.publicnode.com
+      - https://binance.llamarpc.com
+
+  ethereum:
+    usdc_token:        "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+    usdat_token:       "0x23238f20b894f29041f48d88ee91131c395aaa71"
+    curve_usdat_pool:  "0xf4d0cf32908b2c7f1021339c43df0f77f06896d7"   # Curve USDC/USDat
+    iusd_token:        "0x48f9e38f3070AD8945DFEae3FA70987722E3D89c"
+    curve_iusd_pool:   "0x2e2d6c119bdf226c420cb40e3b9fc9689cf5986e"   # Curve iUSD/USDC (~$10K ліквідності!)
+    infinifi_gateway:  "0x3f04b65Ddbd87f9CE0A2e7Eb24d80e7fb87625b5"   # Gateway V1 (docs.infinifi.xyz)
+    liusd13w_token:    "0xbd3f9814eB946E617f1d774A6762cDbec0bf087A"   # для self-test
+    liusd_bucket_weeks: 13
+
+  bsc:
+    usdu_token:        "0xea953ea6634d55dac6697c436b1e81a679db5882"
+    usdt_token:        "0x55d398326f99059fF775485246999027B3197955"
+    pancake_usdu_pool: "0x8aab5522d601bbb85501d703b55a272e47852120"   # PancakeSwap V3 USDu/USDT 0.01%
+
+  # Скільки токенів «продати» в пулі, щоб отримати ціну (через get_dy).
+  # Для USDat пул ~$6.7M → 1000 ок; для iUSD пул ~$10K → лише 100.
+  probe_amounts:
+    usdat: 1000
+    iusd: 100
+
+  geckoterminal:
+    base_url: https://api.geckoterminal.com/api/v2   # резерв для ціни USDu і для tools/find_pools.py
+
+# --- Файли стану ---------------------------------------------------------------
+files:
+  journal: data/journal.csv
+  history: data/history.csv
+  state: data/state.json
+  history_keep_days: 10
