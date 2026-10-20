@@ -678,6 +678,17 @@ class TestTge(unittest.TestCase):
         self.assertEqual(len(msgs), 1)
         self.assertIn("Unitas Labs 宣布", msgs[0])
 
+    def test_ambiguous_names_in_headlines(self):
+        cfg = load_config()["tge"]["projects"]
+        tori, sat = cfg["tori"], cfg["saturn"]
+        kws = load_config()["tge"]["keywords"]
+        ok = lambda p, t: bool(tge.hits(t, tge.news_names(p)) and tge.hits(t, kws)
+                               and not tge.hits(t, list(p.get("exclude", []))))
+        self.assertFalse(ok(tori, "Tori Dunlap's money tips for tax season"))
+        self.assertTrue(ok(tori, "Tori Finance opens Cores Season 2 snapshot"))
+        self.assertFalse(ok(sat, "Saturn Oil & Gas announces TSX listing"))
+        self.assertTrue(ok(sat, "Saturn plans TGE in Q4 2026, allocates up to 5% supply for second season"))
+
     def test_source_failure_alert_once_and_recovery(self):
         self.cfg["tge"]["projects"] = {"tori": dict(load_config()["tge"]["projects"]["tori"], news_query=None,
                                                     bing_queries=None)}

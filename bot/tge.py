@@ -263,6 +263,12 @@ def projects(cfg: dict) -> dict:
     return (cfg.get("tge") or {}).get("projects") or {}
 
 
+def news_names(p: dict, key: str = "") -> list[str]:
+    """Names a news headline must contain. strict_title: only aliases — a bare «Tori» is also Tori Dunlap."""
+    aliases = list(p.get("aliases", []))
+    return aliases if p.get("strict_title") else [p.get("name", key)] + aliases
+
+
 def resolve_project(cfg: dict, word: str) -> str | None:
     w = (word or "").lower().lstrip("$#/")
     for key, p in projects(cfg).items():
@@ -384,7 +390,7 @@ class Watcher:
         found: dict[str, list[dict]] = {}
 
         for key, p in projects(self.cfg).items() if news_due else ():
-            names = [p.get("name", key)] + list(p.get("aliases", []))
+            names = news_names(p, key)
             # Google News + Bing News: the query pins the project; the title must name it and carry a keyword
             engines = []
             if p.get("news_query"):

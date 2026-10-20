@@ -142,6 +142,7 @@ tge:
       aliases: ["Saturn Credit", "Saturn Labs", "Saturn Foundation", STRN, STRNUSDT, USDat, sUSDat]
       news_query: '"Saturn" ("STRN" OR "USDat" OR "sUSDat" OR "Saturn Credit")'   # лапки = точний збіг у Google
       bing_queries: ["Saturn STRN", "Saturn USDat"]   # Bing: лише прості запити, ключові слова фільтрує бот
+      exclude: [Oil, Gas, NASA, planet, rocket, Cassini, moon]   # Saturn Oil & Gas, ракета, планета
       docs_sitemap: https://docs.saturn.credit/sitemap.xml
     unitas:
       name: Unitas
@@ -175,6 +176,7 @@ tge:
       aliases: ["Tori Finance", trUSD, strUSD, "Tori Cores"]
       news_query: '("Tori Finance" OR "trUSD")'
       bing_queries: ['"Tori Finance"', trUSD]
+      strict_title: true   # у заголовку новини потрібен alias: «Tori» без Finance — це й Tori Dunlap, Tori Amos
       docs_sitemap: https://docs.tori.finance/sitemap.xml
 
 # --- Файли стану ---------------------------------------------------------------

@@ -261,7 +261,7 @@ def cmd_selftest(args) -> int:
                 def _news(p=p, eng=eng, q=q):
                     items = (tge.google_news(q, T.get("news_keywords", kws), int(T.get("news_days", 14)))
                              if eng == "gnews" else tge.bing_news(q))
-                    names = [p.get("name", "")] + list(p.get("aliases", []))
+                    names = tge.news_names(p)
                     rel = [x for x in items if tge.hits(x["title"], names) and tge.hits(x["title"], kws)
                            and not tge.hits(x["title"], list(p.get("exclude", [])))]
                     rel.sort(key=lambda x: x["ts"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
@@ -274,7 +274,9 @@ def cmd_selftest(args) -> int:
                 urls = tge.sitemap_urls(p["docs_sitemap"])
                 if not urls:
                     raise RuntimeError("sitemap порожній")
-                tok = sorted({tge.doc_path(u) for u in urls if tge.doc_hit(tge.doc_path(u), [p.get("ticker", "")])})
+                ign = tuple(p.get("docs_ignore") or ())
+                tok = sorted({tge.doc_path(u) for u in urls if tge.doc_hit(tge.doc_path(u), [p.get("ticker", "")])
+                              and not (ign and tge.doc_path(u).startswith(ign))})
                 return f"{len(urls)} сторінок; про токен/поінти: {', '.join(tok[:4]) or 'немає'}"
             check(f"TGE · docs {p.get('name', key)}", _sm, soft=True)
     for ch in T.get("telegram_channels", []) or []:
