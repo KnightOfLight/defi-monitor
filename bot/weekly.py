@@ -103,7 +103,7 @@ def send_digest(ctx: Ctx, today: str) -> None:
                  f"{fmt.pct(wk('pendle_liquidity'), signed=True)}")
     d = wk("strusd_rate")
     lines.append(f"strUSD: <b>{fmt.rate(m.get('strusd_rate'))}</b> {fmt.arrow(d)} {fmt.pct(d, 3, signed=True)} · "
-                 f"буфер першого збитку {fmt.pct(m.get('strusd_buffer_pct'))}")
+                 f"у strUSD {fmt.pct(m.get('strusd_buffer_pct'))} усього trUSD")
     lines.append("")
 
     tl = tge.digest_lines(ctx.cfg, ctx.state, ctx.now)
@@ -126,7 +126,7 @@ def send_digest(ctx: Ctx, today: str) -> None:
         lines.append("ще немає записів")
     lines.append("")
     lines.append("✍️ Запишіть сьогоднішні поінти (app.saturn.credit → Points, app.unitas.so → Points, "
-                 "app.infinifi.xyz → Points, app.tori.finance → Cores):")
+                 "app.infinifi.xyz → Points, Cores — app.tori.finance):")
     lines.append(f"<code>{LOG_EXAMPLE}</code>")
     lines.append("Відповідь допишеться в рядок журналу за сьогодні. Якщо не відповісте — нагадаю в суботу.")
     if ctx.errors:

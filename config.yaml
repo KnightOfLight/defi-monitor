@@ -131,7 +131,7 @@ tge:
       short: [sat, strn]
       expected: "Q4 2026"
       status: "STRN: TGE заплановано на Q4 2026 (анонс 25.09), точної дати немає. Snapshot сезону 2 (до 5% supply)
-        — перед TGE, якщо TGE до 08.12.2026. Allocation checker працює, claim ще не відкритий."
+        — перед TGE, якщо TGE до 08.12.2026. За повідомленнями від 25.09 allocation checker працює, claim ще не відкритий."
       hint: "Snapshot сезону 2 Saturn робиться перед TGE — позиції в Saturn до snapshot не чіпати."
       aliases: ["Saturn Credit", "Saturn Labs", "Saturn Foundation", STRN, USDat, sUSDat]
       news_query: 'Saturn (STRN OR USDat OR sUSDat OR "Saturn Credit")'

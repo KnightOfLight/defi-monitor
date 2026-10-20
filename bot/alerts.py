@@ -202,8 +202,9 @@ class AlertEngine:
                              "із trUSD. Перевірте ціну trUSD і курс strUSD (/status), @tori_finance. "
                              "Вихід — продати PT / зняти LP на app.pendle.finance, поки є ліквідність.")
                 else:
-                    text += ("Або продають PT (сумнів у trUSD), або активно купують YT (ажіотаж навколо поінтів Cores). "
-                             "Якщо trUSD ≈ $1 і strUSD не падав — зазвичай друге.")
+                    text += ("Або масово виходять з PT (сумнів у trUSD; ліквідації на Morpho, де PT-trUSD — застава), "
+                             "або активно купують YT (ажіотаж навколо поінтів Cores). Якщо trUSD ≈ $1 і strUSD не падав — "
+                             "зазвичай друге.")
                 self._fire("pendle_pt", "pendle", level, text,
                            f"PT-trUSD стабілізувався: <b>{fmt.rate(pt)}</b> trUSD (24 год {fmt.pct(d24, 2, signed=True)})")
 
@@ -265,8 +266,9 @@ class AlertEngine:
         if days <= 0:
             if "expired" not in sent:
                 self._event(f"⌛ Ринок {PENDLE_NAME} <b>погашено</b> ({date}). PT = 1 trUSD.\n"
-                            f"Позиція більше нічого не заробляє (ні комісій, ні поінтів): на app.pendle.finance → "
-                            f"Dashboard зніміть LP і погасіть PT у trUSD, YT — заберіть нараховане.\n"
+                            f"Торгів більше немає: LP не отримує комісій і PENDLE, YT нічого не нараховує; чи рахує Tori "
+                            f"Cores на погашені позиції — не гарантовано. На app.pendle.finance → Dashboard зніміть LP "
+                            f"і погасіть PT у trUSD, YT — заберіть нараховане.\n"
                             f"Щоб бот стежив за новим ринком — змініть <code>pendle_trusd_market</code> і "
                             f"<code>pendle_trusd_pt</code> у config.yaml.\n" + self._other_markets_text(), level="info")
                 sent.append("expired")
@@ -276,7 +278,8 @@ class AlertEngine:
         if not crossed:
             return
         self._event(f"⏳ Ринок {PENDLE_NAME} погашається <b>{date}</b> — через <b>{days:.1f} дн.</b>\n"
-                    f"Після погашення LP не заробляє, PT погашається 1:1 у trUSD, YT перестає нараховувати.\n"
+                    f"Після погашення LP не отримує комісій і PENDLE, PT погашається 1:1 у trUSD, YT перестає "
+                    f"нараховувати; чи рахуватимуться Cores — не гарантовано.\n"
                     f"План: PT — тримати до дати й погасити (або продати раніше, якщо ціна вже ≈ 1); "
                     f"LP — зняти після погашення; YT — забрати нараховане.\n" + self._other_markets_text(), level="info")
         sent.extend(f"{d:g}" for d in remind if days <= d and f"{d:g}" not in sent)
@@ -304,9 +307,10 @@ class AlertEngine:
         if rate is not None and prev not in (None, 0) and rate < prev * (1 - tol):
             self._event(f"Курс strUSD <b>впав</b>: {fmt.rate(prev)} → <b>{fmt.rate(rate)}</b> trUSD "
                         f"({fmt.pct(fmt.change_pct(rate, prev), 3, signed=True)})\n"
-                        f"Tori списав збиток стратегій (reportLoss): за кодом контракту збиток спалює trUSD зі сховища "
-                        f"strUSD — це буфер першого збитку для trUSD. Буфер зараз: {fmt.pct(m.get('strusd_buffer_pct'))} "
-                        f"від trUSD в обігу; ліміт списання — 5% сховища на добу.\n"
+                        f"За кодом контракту курс strUSD падає лише тоді, коли Tori списує збиток (reportLoss): він "
+                        f"спалює trUSD зі сховища strUSD. Тобто збиток стратегій пішов на стейкерів strUSD, а не "
+                        f"(лише) на резервний фонд. strUSD стоїть між таким збитком і звичайним trUSD: у ньому зараз "
+                        f"{fmt.pct(m.get('strusd_buffer_pct'))} усього trUSD; ліміт списання — 5% сховища на добу.\n"
                         f"trUSD: {fmt.price(m.get('price_trusd'))} · PT-trUSD: {fmt.rate(m.get('pendle_pt_price'))}. "
                         f"Перевірте @tori_finance і tori.accountable.capital; якщо збиток повториться завтра — "
                         f"це вже не разовий епізод.")

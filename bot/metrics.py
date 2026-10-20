@@ -117,7 +117,7 @@ def collect(cfg: dict) -> tuple[dict, dict]:
             except Exception as e2:
                 errors["curve_trusd"] += f"; DefiLlama coins: {e2}"
 
-        # --- Tori on-chain: strUSD rate, first-loss buffer, trUSD supply -----
+        # --- Tori on-chain: strUSD rate, strUSD share of trUSD, trUSD supply -----
         try:
             t = sources.tori_state(eth, E["trusd_token"], E["strusd_token"])
             m["strusd_rate"] = t["strusd_rate"]

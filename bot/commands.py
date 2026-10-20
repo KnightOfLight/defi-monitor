@@ -175,7 +175,7 @@ def pendle_status_lines(cfg: dict, m: dict, lv: dict, state: dict, now: datetime
     lines.append(f"Implied APY: <b>{fmt.pct(m.get('pendle_implied_apy'), 2)}</b> — {lv['pendle_apy']}")
     lines.append(f"Ліквідність ринку: <b>{fmt.money(m.get('pendle_liquidity'))}</b> — {lv['pendle_liquidity']}")
     supply = m.get("trusd_supply")
-    lines.append(f"strUSD: <b>{fmt.rate(m.get('strusd_rate'))}</b> trUSD · буфер першого збитку "
+    lines.append(f"strUSD: <b>{fmt.rate(m.get('strusd_rate'))}</b> trUSD · у strUSD (буфер перед trUSD) "
                  f"{fmt.pct(m.get('strusd_buffer_pct'))} від trUSD в обігу "
                  f"({fmt.num(supply / 1e6, 1) + ' млн' if supply is not None else 'н/д'})")
     mine = (cfg["sources"]["ethereum"].get("pendle_trusd_market") or "").lower()

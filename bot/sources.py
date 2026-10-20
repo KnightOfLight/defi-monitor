@@ -339,9 +339,10 @@ def pendle_markets_for_underlying(api_url: str, chain_id: int, underlying: str) 
 # Tori (trUSD / strUSD) — github.com/Tori-Finance/tori-contracts
 # --------------------------------------------------------------------------
 def tori_state(chain: Chain, trusd: str, strusd: str) -> dict:
-    """strUSD is an ERC-4626 vault over trUSD (StakedTrUSD.sol). Strategy losses are written off with
-    `reportLoss`, which burns trUSD held by strUSD (≤5% of the vault per 24 h) — so strUSD is the
-    first-loss buffer for plain trUSD and its exchange rate only ever drops on a reported loss."""
+    """strUSD is an ERC-4626 vault over trUSD (StakedTrUSD.sol). Strategy drawdowns are first absorbed by
+    Tori's reserve fund (docs.tori.finance/solution/reserve-fund, size in the attestations); a loss written
+    off with `reportLoss` burns trUSD held by strUSD (≤5% of the vault per 24 h), so strUSD sits between such
+    a loss and plain trUSD. The exchange rate can only drop through reportLoss (or a timelocked upgrade)."""
     out: dict = {"errors": {}}
 
     def read(key, fn):

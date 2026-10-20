@@ -16,6 +16,7 @@ import hashlib
 import html
 import re
 import xml.etree.ElementTree as ET
+from html.parser import HTMLParser
 from datetime import date, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import quote_plus, urlsplit
@@ -123,27 +124,68 @@ def telegram_channel(channel: str, session=None) -> list[dict]:
     return posts
 
 
+class _TmeParser(HTMLParser):
+    """t.me/s/<channel> → posts. Text is taken only from the post's own .tgme_widget_message_text:
+    a reply quotes the original post inside .tgme_widget_message_reply with the same class (RSSHub
+    selects `.tgme_widget_message_bubble > .tgme_widget_message_text` for the same reason)."""
+    VOID = {"br", "img", "meta", "link", "input", "hr", "source", "wbr", "area", "col", "embed", "param", "track"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.stack: list[tuple[str, set]] = []
+        self.posts: list[dict] = []
+        self.cur: dict | None = None
+        self.text_depth: int | None = None
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        cls = set((a.get("class") or "").split())
+        if tag == "br" and self.text_depth is not None:
+            self.cur["text"].append("\n")
+        if tag in self.VOID:
+            return
+        self.stack.append((tag, cls))
+        if "tgme_widget_message" in cls and a.get("data-post"):
+            self.cur = {"post": a["data-post"], "text": [], "ts": None, "has_text": False}
+            self.posts.append(self.cur)
+        elif self.cur is not None:
+            in_reply = any("tgme_widget_message_reply" in c for _, c in self.stack[:-1])
+            if "tgme_widget_message_text" in cls and self.text_depth is None and not in_reply and not self.cur["has_text"]:
+                self.text_depth = len(self.stack)
+                self.cur["has_text"] = True
+            if tag == "time" and a.get("datetime") and self.cur["ts"] is None:
+                self.cur["ts"] = a["datetime"]
+
+    def handle_endtag(self, tag):
+        if tag in self.VOID:
+            return
+        while self.stack:                        # tolerate unclosed tags
+            t, _ = self.stack.pop()
+            if self.text_depth is not None and len(self.stack) < self.text_depth:
+                self.text_depth = None
+            if t == tag:
+                break
+
+    def handle_data(self, data):
+        if self.text_depth is not None and self.cur is not None:
+            self.cur["text"].append(data)
+
+
 def parse_tme(page: str) -> list[dict]:
+    p = _TmeParser()
+    p.feed(page)
     out = []
-    parts = re.split(r'(?=<div class="tgme_widget_message_wrap)', page)
-    for block in parts:
-        m = re.search(r'data-post="([^"]+)"', block)
-        if not m:
-            continue
-        post = m.group(1)
-        tm = re.search(r'class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>', block, re.S)
-        text = _strip_tags(tm.group(1)) if tm else ""
-        dm = re.search(r'<time[^>]*datetime="([^"]+)"', block)
+    for x in p.posts:
+        text = re.sub(r"[ \t]+\n", "\n", "".join(x["text"])).strip()
         ts = None
-        if dm:
+        if x["ts"]:
             try:
-                ts = datetime.fromisoformat(dm.group(1)).astimezone(timezone.utc)
+                ts = datetime.fromisoformat(x["ts"]).astimezone(timezone.utc)
             except ValueError:
                 pass
         if text:
-            first = text.split("\n", 1)[0]
-            out.append({"id": f"tg:{post}", "title": first[:200], "text": text, "link": f"https://t.me/{post}",
-                        "ts": ts, "via": f"Telegram @{post.split('/')[0]}"})
+            out.append({"id": f"tg:{x['post']}", "title": text.split("\n", 1)[0][:200], "text": text,
+                        "link": f"https://t.me/{x['post']}", "ts": ts, "via": f"Telegram @{x['post'].split('/')[0]}"})
     return out
 
 
@@ -209,8 +251,11 @@ def parse_date(s: str, today: date) -> date | None:
             pass
     m = re.fullmatch(r"(\d{1,2})\.(\d{1,2})", s)
     if m:
-        d = date(today.year, int(m.group(2)), int(m.group(1)))
-        return d if d >= today - timedelta(days=1) else date(today.year + 1, d.month, d.day)
+        try:
+            d = date(today.year, int(m.group(2)), int(m.group(1)))
+            return d if d >= today - timedelta(days=1) else date(today.year + 1, d.month, d.day)
+        except ValueError:                       # 31.02, 29.02 у невисокосний рік
+            return None
     return None
 
 

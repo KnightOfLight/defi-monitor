@@ -6,7 +6,7 @@ import shutil
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -543,6 +543,32 @@ class TestTge(unittest.TestCase):
                             "https://docs.x.io/sitemap-pages.xml": SITEMAP_PAGES.format(extra="")})
         self.assertEqual(tge.sitemap_urls("https://docs.x.io/sitemap.xml", sess),
                          {"https://docs.x.io/overview", "https://docs.x.io/es/overview"})
+
+    def test_tme_reply_quote_is_not_the_post(self):
+        page = """<div class="tgme_widget_message_wrap js-widget_message_wrap">
+<div class="tgme_widget_message js-widget_message" data-post="wublockchainenglish/7">
+<div class="tgme_widget_message_bubble">
+<a class="tgme_widget_message_reply" href="https://t.me/wublockchainenglish/6">
+<div class="tgme_widget_message_author accent_color"><span class="tgme_widget_message_author_name">Wu</span></div>
+<div class="tgme_widget_message_text js-message_text" dir="auto">Old: infiniFi TGE <a href="https://x.com/a">rumor</a></div></a>
+<div class="tgme_widget_message_text js-message_text" dir="auto">Update: <b>Saturn</b> Foundation sets <i class="emoji"><b>🚀</b></i> STRN TGE<br/>for Nov 20</div>
+<div class="tgme_widget_message_footer"><a class="tgme_widget_message_date" href="https://t.me/wublockchainenglish/7"><time datetime="2026-10-21T09:15:00+00:00" class="time">09:15</time></a></div>
+</div></div></div>
+<div class="tgme_widget_message_wrap js-widget_message_wrap">
+<div class="tgme_widget_message js-widget_message" data-post="wublockchainenglish/8"><div class="tgme_widget_message_bubble">
+<a class="tgme_widget_message_reply" href="#"><div class="tgme_widget_message_text js-message_text">infiniFi airdrop quoted</div></a>
+<a class="tgme_widget_message_photo_wrap" href="#"></a>
+<a class="tgme_widget_message_date" href="#"><time datetime="2026-10-21T09:16:00+00:00">09:16</time></a></div></div></div>"""
+        posts = tge.parse_tme(page)
+        self.assertEqual(len(posts), 1)                    # media-only reply has no own text → skipped
+        self.assertEqual(posts[0]["text"], "Update: Saturn Foundation sets 🚀 STRN TGE\nfor Nov 20")
+        self.assertNotIn("infiniFi", posts[0]["text"])
+        self.assertEqual(posts[0]["ts"], datetime(2026, 10, 21, 9, 15, tzinfo=UTC))
+        today = date(2026, 10, 20)
+        self.assertEqual(tge.parse_date("20.11", today), date(2026, 11, 20))
+        self.assertEqual(tge.parse_date("05.01", today), date(2027, 1, 5))
+        self.assertIsNone(tge.parse_date("31.02", today))
+        self.assertIsNone(tge.parse_date("завтра", today))
 
     def test_watcher_seed_then_report(self):
         from email.utils import format_datetime
