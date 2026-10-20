@@ -19,12 +19,16 @@ POINT_ALIASES = {
     "unitas": "unitas_points", "uni": "unitas_points", "up": "unitas_points", "usdu": "unitas_points",
     "infinifi": "infinifi_points", "inf": "infinifi_points", "infi": "infinifi_points", "iusd": "infinifi_points",
     "liusd": "infinifi_points",
+    "tori": "tori_points", "cores": "tori_points", "core": "tori_points", "trusd": "tori_points",
+    "strusd": "tori_points",
 }
-POINT_LABELS = {"saturn_points": "Saturn", "unitas_points": "Unitas", "infinifi_points": "InfiniFi"}
+POINT_LABELS = {"saturn_points": "Saturn", "unitas_points": "Unitas", "infinifi_points": "InfiniFi",
+                "tori_points": "Tori (Cores)"}
+LOG_EXAMPLE = "/log saturn 123456 unitas 7890 infinifi 4567 tori 2500"
 
 HELP = """<b>Команди бота</b>
 /status — поточні значення всіх метрик і рівень відносно порогів
-/log saturn 123456 unitas 7890 infinifi 4567 — записати поінти (можна будь-якого дня; пропущені протоколи можна не вказувати)
+/log saturn 123456 unitas 7890 infinifi 4567 tori 2500 — записати поінти (можна будь-якого дня; пропущені протоколи можна не вказувати; tori = Cores)
 /note текст — дописати примітку до останнього рядка журналу
 /export — надіслати журнал CSV + підсумок за тиждень і місяць
 /thresholds — показати пороги алертів
@@ -122,19 +126,19 @@ def status_text(ctx: Ctx) -> str:
     lines = [f"📊 <b>Статус</b> · {local} (Київ)", ""]
     lines.append("<b>Ціни (найглибший пул)</b>")
     lines.append(f"USDat: <b>{fmt.price(m['price_usdat'])}</b> — {lv['price_usdat']}")
-    lines.append(f"USDu: <b>{fmt.price(m['price_usdu'])}</b> — {lv['price_usdu']}")
+    lines.append(f"USDu: <b>{fmt.price(m['price_usdu'])}</b> — {lv['price_usdu']} "
+                 f"(PancakeSwap ~{fmt.money(m.get('usdu_pool_liquidity'), 1)})")
     lines.append(f"iUSD: <b>{fmt.price(m['price_iusd'])}</b> — {lv['price_iusd']} "
                  f"(пул ~{fmt.money(m.get('curve_iusd_liquidity'), 0)}; курс погашення в протоколі "
                  f"{fmt.price(m.get('iusd_redeem_rate'))})")
+    lines.append(f"trUSD: <b>{fmt.price(m['price_trusd'])}</b> — {lv['price_trusd']} "
+                 f"(Curve frxUSD/trUSD ~{fmt.money(m.get('trusd_pool_liquidity'), 1)})")
     lines.append("")
     lines.append("<b>TVL (DefiLlama)</b>")
-    for p, name in (("saturn", "Saturn"), ("unitas", "Unitas"), ("infinifi", "InfiniFi")):
+    for p, name in (("saturn", "Saturn"), ("unitas", "Unitas"), ("infinifi", "InfiniFi"), ("tori", "Tori")):
         lines.append(f"{name}: <b>{fmt.money(m[f'tvl_{p}'])}</b> — {lv[f'tvl_{p}']}")
     lines.append("")
-    lines.append("<b>Пул Curve USDC/USDat</b>")
-    lines.append(f"Частка USDat: <b>{fmt.pct(m['curve_usdat_share'])}</b> — {lv['curve_usdat_share']}")
-    lines.append(f"Ліквідність: <b>{fmt.money(m['curve_pool_liquidity'])}</b> — {lv['curve_pool_liquidity']}")
-    lines.append(f"USDu/USDT (PancakeSwap V3): ліквідність {fmt.money(m.get('usdu_pool_liquidity'))}")
+    lines += pendle_status_lines(ctx.cfg, m, lv, ctx.state, ctx.now)
     lines.append("")
     lines.append("<b>InfiniFi (on-chain)</b>")
     lines.append(f"Rate liUSD-13w: <b>{fmt.rate(m['liusd13w_rate'])}</b>")
@@ -155,25 +159,54 @@ def status_text(ctx: Ctx) -> str:
     return "\n".join(lines)
 
 
+def pendle_status_lines(cfg: dict, m: dict, lv: dict, state: dict, now: datetime) -> list[str]:
+    days = m.get("pendle_days_to_expiry")
+    expiry = ""
+    if days is not None:
+        when = now + timedelta(days=days)
+        expiry = f"погашення {when:%d.%m.%Y}, " + ("<b>уже погашено</b>" if days <= 0 else f"через {days:.0f} дн.")
+    lines = [f"<b>Tori · Pendle trUSD</b> ({expiry or 'н/д'})"]
+    lines.append(f"PT-trUSD: <b>{fmt.rate(m.get('pendle_pt_price'))}</b> trUSD "
+                 f"(= {fmt.price(m.get('pendle_pt_price_usd'))}) — {lv['pendle_pt']}")
+    lines.append(f"Implied APY: <b>{fmt.pct(m.get('pendle_implied_apy'), 2)}</b> — {lv['pendle_apy']}")
+    lines.append(f"Ліквідність ринку: <b>{fmt.money(m.get('pendle_liquidity'))}</b> — {lv['pendle_liquidity']}")
+    supply = m.get("trusd_supply")
+    lines.append(f"strUSD: <b>{fmt.rate(m.get('strusd_rate'))}</b> trUSD · буфер першого збитку "
+                 f"{fmt.pct(m.get('strusd_buffer_pct'))} від trUSD в обігу "
+                 f"({fmt.num(supply / 1e6, 1) + ' млн' if supply is not None else 'н/д'})")
+    mine = (cfg["sources"]["ethereum"].get("pendle_trusd_market") or "").lower()
+    others = [x for x in state.get("pendle_trusd_markets") or [] if x.get("address") != mine]
+    if others:
+        lines.append("Інші ринки trUSD: " + "; ".join(f"{esc(x.get('expiry'))} (APY {fmt.pct(x.get('implied_apy_pct'), 1)})"
+                                                     for x in others))
+    return lines
+
+
 # --------------------------------------------------------------------------
 # /thresholds
 # --------------------------------------------------------------------------
 def thresholds_text(cfg: dict) -> str:
     A = cfg["alerts"]
-    P, T, C, I = A["price"], A["tvl"], A["curve_pool"], A["infinifi"]
+    P, T, I = A["price"], A["tvl"], A["infinifi"]
+    PP = A.get("pendle") or {}
     ab = P["alarm_below"]
     return "\n".join([
         "<b>Пороги (config.yaml)</b>",
         f"Ціни: увага &lt; {P['warn_below']} на {P.get('warn_consecutive', 2)} перевірках поспіль; "
-        f"тривога одразу: USDat &lt; {ab.get('usdat')}, USDu &lt; {ab.get('usdu')}, iUSD &lt; {ab.get('iusd')}",
+        f"тривога одразу: USDat &lt; {ab.get('usdat')}, USDu &lt; {ab.get('usdu')}, iUSD &lt; {ab.get('iusd')}, "
+        f"trUSD &lt; {ab.get('trusd')}",
         f"TVL: увага −{T['warn_drop_7d_pct']}% за 7 дн; тривога −{T['alarm_drop_24h_pct']}% за 24 год; "
         f"інфо Saturn &gt; {fmt.money(T['saturn_high_usd'], 0)}",
-        f"Пул Curve: частка USDat увага &gt; {C['usdat_share_warn_pct']}%, тривога &gt; {C['usdat_share_alarm_pct']}%; "
-        f"ліквідність −{C['liquidity_drop_7d_warn_pct']}% за 7 дн → увага",
+        f"Pendle trUSD: PT дешевшає за 24 год на {PP.get('pt_drop_24h_warn_pct', 0.5)}% → увага, "
+        f"на {PP.get('pt_drop_24h_alarm_pct', 1.5)}% → тривога; implied APY &gt; {PP.get('implied_apy_warn_pct', 30)}% "
+        f"(крім останніх {PP.get('apy_ignore_last_days', 7)} дн) → увага; ліквідність ринку "
+        f"−{PP.get('liquidity_drop_24h_warn_pct', 25)}% за 24 год або −{PP.get('liquidity_drop_7d_warn_pct', 30)}% за 7 дн → увага; "
+        f"нагадування за {', '.join(str(d) for d in PP.get('maturity_remind_days', [14, 7, 2]))} дн до погашення",
+        "Tori: будь-яке падіння курсу strUSD (списаний збиток) → тривога",
         f"InfiniFi: резерв &lt; {I['reserve_warn_pct']}% TVL {I['reserve_warn_days']} дн поспіль → увага; "
         f"черга redemption &gt; {I['queue_alarm_hours']} год → тривога; будь-яке падіння rate liUSD-13w → тривога",
         f"Антиспам: повтор раз на {A['repeat_hours']} год; warm-up {A['warmup_days']} дн "
-        f"(глушаться: {', '.join(A.get('warmup_suppress', []))})",
+        f"(глушаться: {', '.join(A.get('warmup_suppress', [])) or '—'})",
     ])
 
 
@@ -219,7 +252,7 @@ def parse_points(arg: str) -> dict[str, float]:
 def cmd_log(ctx: Ctx, arg: str) -> str:
     pts = parse_points(arg)
     if not pts:
-        return ("Формат: <code>/log saturn 123456 unitas 7890 infinifi 4567</code>\n"
+        return (f"Формат: <code>{LOG_EXAMPLE}</code>\n"
                 "Можна вказати лише частину протоколів.")
     path = ctx.cfg["files"]["journal"]
     rows = load_journal(path)
@@ -312,6 +345,8 @@ def cmd_export(ctx: Ctx) -> str:
                 rv = to_float(ref.get(col))
                 if kind in ("money", "price", "rate"):
                     parts.append(f"{tag} {fmt.pct(fmt.change_pct(cur, rv), 2 if kind != 'money' else 1, signed=True)}")
+                elif kind == "pct" and cur is not None and rv is not None:
+                    parts.append(f"{tag} {cur - rv:+.2f} п.п.")
                 elif cur is not None and rv is not None:
                     parts.append(f"{tag} {'+' if cur - rv >= 0 else ''}{fmt.num(cur - rv)}")
         return " · ".join(parts)
@@ -322,16 +357,21 @@ def cmd_export(ctx: Ctx) -> str:
              line("Поінти Saturn", "saturn_points", "num"),
              line("Поінти Unitas", "unitas_points", "num"),
              line("Поінти InfiniFi", "infinifi_points", "num"),
+             line("Поінти Tori (Cores)", "tori_points", "num"),
              line("TVL Saturn", "tvl_saturn", "money"),
              line("TVL Unitas", "tvl_unitas", "money"),
              line("TVL InfiniFi", "tvl_infinifi", "money"),
+             line("TVL Tori", "tvl_tori", "money"),
              line("USDat", "price_usdat", "price"),
              line("USDu", "price_usdu", "price"),
              line("iUSD", "price_iusd", "price"),
+             line("trUSD", "price_trusd", "price"),
              line("Rate liUSD-13w", "liusd13w_rate", "rate"),
              line("Резерв InfiniFi", "infinifi_liquid_reserve", "money"),
-             line("Частка USDat у Curve", "curve_usdat_share", "pct"),
-             line("Ліквідність Curve", "curve_pool_liquidity", "money"),
+             line("Курс strUSD", "strusd_rate", "rate"),
+             line("PT-trUSD", "pendle_pt_price", "rate"),
+             line("Implied APY trUSD", "pendle_implied_apy", "pct"),
+             line("Ліквідність Pendle trUSD", "pendle_liquidity", "money"),
              ]
     notes = [f"{r['date']}: {r['note']}" for r in rows[-8:] if r.get("note")]
     if notes:

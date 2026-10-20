@@ -20,9 +20,14 @@ from .commands import Ctx, handle_updates, status_text
 from .config import load_config, require_telegram
 from .evm import Chain, mask_url, same_addr
 from .metrics import collect
-from .storage import append_history, iso, load_history, load_state, save_state, utcnow
+from .storage import append_history, iso, load_history, load_state, parse_iso, save_state, utcnow
 from .telegram import Telegram
 from .weekly import run_weekly
+
+
+UPGRADE_NOTE = ("додано Tori — ринок Pendle trUSD (PT, implied APY, ліквідність, погашення 26.11), ціна trUSD, "
+                "курс strUSD, TVL Tori, поінти <code>/log tori …</code>; прибрано моніторинг пулу Curve USDC/USDat "
+                "(ціна USDat лишилась).")
 
 
 def make_ctx(cfg: dict, dry_run: bool = False) -> Ctx:
@@ -32,11 +37,35 @@ def make_ctx(cfg: dict, dry_run: bool = False) -> Ctx:
 
 
 # --------------------------------------------------------------------------
+def refresh_pendle_markets(cfg: dict, state: dict, now) -> None:
+    """Once a day: which trUSD markets are active on Pendle (for rollover after maturity).
+    Optional — a failure is only logged, never alerted."""
+    E, P = cfg["sources"]["ethereum"], cfg["sources"].get("pendle") or {}
+    if not (E.get("trusd_token") and P.get("api_url")):
+        return
+    hours = float((cfg["alerts"].get("pendle") or {}).get("new_market_check_hours", 24))
+    last = parse_iso(state.get("pendle_markets_checked_at"))
+    if last and (now - last).total_seconds() < hours * 3600:
+        return
+    try:
+        state["pendle_trusd_markets"] = sources.pendle_markets_for_underlying(
+            P["api_url"], int(P.get("chain_id", 1)), E["trusd_token"])
+        state["pendle_markets_checked_at"] = iso(now)
+    except Exception as e:
+        print(f"[warn] Pendle API (markets/active): {e}", file=sys.stderr)
+
+
 def monitor_pass(ctx: Ctx, process_commands: bool = True) -> None:
     cfg, state = ctx.cfg, ctx.state
     first_run = not state.get("started_at")
     if first_run:
         state["started_at"] = iso(ctx.now)
+    refresh_pendle_markets(cfg, state, ctx.now)
+    if not state.get("pendle_markets_seeded") and state.get("pendle_markets_checked_at"):
+        # markets that already exist at the very first successful check are not «new» — remember them silently
+        state["pendle_known_markets"] = sorted({x["address"] for x in state.get("pendle_trusd_markets") or []}
+                                               | set(state.get("pendle_known_markets") or []))
+        state["pendle_markets_seeded"] = True
 
     ctx.metrics, ctx.errors = collect(cfg)
     ctx.history = load_history(cfg["files"]["history"])
@@ -52,6 +81,11 @@ def monitor_pass(ctx: Ctx, process_commands: bool = True) -> None:
     if first_run:
         note = warmup_note(engine) or ""
         ctx.tg.send(f"🤖 Бот запущено (v{__version__}). {note}\n\n" + status_text(ctx))
+    elif state.get("announced_version") != __version__:
+        for obsolete in ("curve_share", "curve_liquidity"):     # алерти пулу Curve USDat прибрані у v1.1
+            state.get("alerts", {}).pop(obsolete, None)
+        ctx.tg.send(f"🔄 Бот оновлено до v{__version__}: {UPGRADE_NOTE}\n\n" + status_text(ctx))
+    state["announced_version"] = __version__
     for msg in messages:
         ctx.tg.send(msg)
 
@@ -131,9 +165,8 @@ def cmd_selftest(args) -> int:
 
     def _curve():
         c = sources.curve_pool_state(eth, E["curve_usdat_pool"], E["usdat_token"], src["probe_amounts"]["usdat"])
-        return (f"{'/'.join(c['symbols'])}: ціна USDat {c['price']:.5f}, частка USDat {c['share_pct']:.1f}%, "
-                f"ліквідність ${c['liquidity_usd'] / 1e6:.2f}M")
-    check("Curve USDC/USDat", _curve)
+        return f"{'/'.join(c['symbols'])}: ціна USDat {c['price']:.5f}"
+    check("Curve USDC/USDat (ціна USDat)", _curve)
 
     def _curve_iusd():
         c = sources.curve_pool_state(eth, E["curve_iusd_pool"], E["iusd_token"], src["probe_amounts"]["iusd"])
@@ -162,6 +195,52 @@ def cmd_selftest(args) -> int:
             res += " | не прочитано: " + "; ".join(f"{k}: {v}" for k, v in i["errors"].items())
         return res
     check("InfiniFi on-chain", _inf)
+
+    def _curve_trusd():
+        c = sources.curve_pool_state(eth, E["curve_trusd_pool"], E["trusd_token"], src["probe_amounts"].get("trusd", 1000))
+        return f"{'/'.join(c['symbols'])}: ціна trUSD {c['price']:.5f}, ліквідність ${c['liquidity_usd']:,.0f}"
+    check("Curve frxUSD/trUSD", _curve_trusd)
+
+    def _llama_coin():
+        p = sources.defillama_coin_price(src["defillama"].get("coins_url", "https://coins.llama.fi"),
+                                         "ethereum", E["trusd_token"])
+        return f"ціна trUSD {p:.5f} (резервне джерело)"
+    check("DefiLlama coins trUSD", _llama_coin)
+
+    def _tori():
+        t = sources.tori_state(eth, E["trusd_token"], E["strusd_token"])
+        try:
+            asset_ok = same_addr(eth.addr(E["strusd_token"], "asset()"), E["trusd_token"])
+        except Exception:
+            asset_ok = False
+        res = (f"trUSD в обігу {fmt.num(t['trusd_supply'])}, курс strUSD {fmt.rate(t['strusd_rate'])}, "
+               f"буфер strUSD {fmt.pct(t['strusd_buffer_pct'])}; strUSD.asset() == trUSD: {'так' if asset_ok else 'НІ — перевірте адреси'}")
+        if t["errors"]:
+            res += " | не прочитано: " + "; ".join(f"{k}: {v}" for k, v in t["errors"].items())
+        if not asset_ok:
+            raise RuntimeError(res)
+        return res
+    check("Tori on-chain (trUSD / strUSD)", _tori)
+
+    def _pendle():
+        import time as _t
+        pm = sources.pendle_market_state(eth, E["pendle_trusd_market"], _t.time())
+        pt_ok = same_addr(pm["pt"], E.get("pendle_trusd_pt") or pm["pt"])
+        res = (f"PT {pm['pt_price']:.6f} trUSD, implied APY {pm['implied_apy_pct']:.2f}%, "
+               f"ліквідність {fmt.num(pm['liquidity_asset'])} trUSD, до погашення {pm['days_to_expiry']:.1f} дн; "
+               f"PT з readTokens() == PT з config: {'так' if pt_ok else 'НІ — перевірте адреси'}")
+        if not pt_ok:
+            raise RuntimeError(res)
+        return res
+    check("Pendle trUSD on-chain", _pendle)
+
+    def _pendle_api():
+        mk = sources.pendle_market_api(src["pendle"]["api_url"], int(src["pendle"].get("chain_id", 1)), E["pendle_trusd_market"])
+        allm = sources.pendle_markets_for_underlying(src["pendle"]["api_url"], int(src["pendle"].get("chain_id", 1)),
+                                                     E["trusd_token"])
+        return (f"API: PT {mk['pt_price']:.6f}, APY {mk['implied_apy_pct']:.2f}%, ліквідність ${mk['liquidity_usd']:,.0f}; "
+                f"активних ринків trUSD: {len(allm)} ({', '.join(x['expiry'] for x in allm)}) (резервне джерело)")
+    check("Pendle API", _pendle_api)
 
     tg_ok = bool(cfg["telegram"]["token"] and cfg["telegram"]["chat_id"])
     if tg_ok:

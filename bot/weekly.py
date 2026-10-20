@@ -4,12 +4,10 @@ from __future__ import annotations
 from datetime import timedelta
 
 from . import fmt
-from .commands import Ctx
+from .commands import LOG_EXAMPLE, POINT_LABELS, Ctx
 from .storage import (POINTS_COLUMNS, journal_row_from_metrics, last_row_with_points, load_journal, save_journal,
                       to_float, value_ago)
 from .telegram import esc
-
-POINT_LABELS = {"saturn_points": "Saturn", "unitas_points": "Unitas", "infinifi_points": "InfiniFi"}
 
 
 def _due(ctx: Ctx, weekday: int) -> bool:
@@ -83,12 +81,12 @@ def send_digest(ctx: Ctx, today: str) -> None:
     local = ctx.local_now().strftime("%d.%m.%Y")
     lines = [f"📅 <b>Тижневий дайджест</b> · {local}", ""]
     lines.append("<b>TVL (зміна за тиждень)</b>")
-    for p, name in (("saturn", "Saturn"), ("unitas", "Unitas"), ("infinifi", "InfiniFi")):
+    for p, name in (("saturn", "Saturn"), ("unitas", "Unitas"), ("infinifi", "InfiniFi"), ("tori", "Tori")):
         d = wk(f"tvl_{p}")
         lines.append(f"{name}: <b>{fmt.money(m[f'tvl_{p}'])}</b> {fmt.arrow(d)} {fmt.pct(d, signed=True)}")
     lines.append("")
     lines.append("<b>Ціни</b>")
-    for a, name in (("usdat", "USDat"), ("usdu", "USDu"), ("iusd", "iUSD")):
+    for a, name in (("usdat", "USDat"), ("usdu", "USDu"), ("iusd", "iUSD"), ("trusd", "trUSD")):
         d = wk(f"price_{a}")
         lines.append(f"{name}: <b>{fmt.price(m[f'price_{a}'])}</b> {fmt.arrow(d)} {fmt.pct(d, 2, signed=True)}")
     lines.append("")
@@ -96,8 +94,16 @@ def send_digest(ctx: Ctx, today: str) -> None:
     lines.append(f"Rate liUSD-13w: <b>{fmt.rate(m['liusd13w_rate'])}</b> {fmt.arrow(d)} {fmt.pct(d, 3, signed=True)}")
     lines.append(f"Резерв InfiniFi: <b>{fmt.money(m['infinifi_liquid_reserve'])}</b> "
                  f"({fmt.pct(m['infinifi_liquid_reserve_pct'])} TVL); черга: {fmt.num(m['infinifi_queue_iusd'])} iUSD")
-    lines.append(f"Curve USDC/USDat: частка USDat <b>{fmt.pct(m['curve_usdat_share'])}</b>, "
-                 f"ліквідність <b>{fmt.money(m['curve_pool_liquidity'])}</b> {fmt.pct(wk('curve_pool_liquidity'), signed=True)}")
+    lines.append("")
+    days = m.get("pendle_days_to_expiry")
+    left = "н/д" if days is None else ("погашено" if days <= 0 else f"до погашення {days:.0f} дн.")
+    lines.append(f"<b>Pendle trUSD</b> ({left})")
+    lines.append(f"PT-trUSD: <b>{fmt.rate(m.get('pendle_pt_price'))}</b> trUSD · implied APY "
+                 f"<b>{fmt.pct(m.get('pendle_implied_apy'), 2)}</b> · ліквідність <b>{fmt.money(m.get('pendle_liquidity'))}</b> "
+                 f"{fmt.pct(wk('pendle_liquidity'), signed=True)}")
+    d = wk("strusd_rate")
+    lines.append(f"strUSD: <b>{fmt.rate(m.get('strusd_rate'))}</b> {fmt.arrow(d)} {fmt.pct(d, 3, signed=True)} · "
+                 f"буфер першого збитку {fmt.pct(m.get('strusd_buffer_pct'))}")
     lines.append("")
 
     # points: last two logged rows
@@ -116,8 +122,8 @@ def send_digest(ctx: Ctx, today: str) -> None:
         lines.append("ще немає записів")
     lines.append("")
     lines.append("✍️ Запишіть сьогоднішні поінти (app.saturn.credit → Points, app.unitas.so → Points, "
-                 "app.infinifi.xyz → Points):")
-    lines.append("<code>/log saturn 123456 unitas 7890 infinifi 4567</code>")
+                 "app.infinifi.xyz → Points, app.tori.finance → Cores):")
+    lines.append(f"<code>{LOG_EXAMPLE}</code>")
     lines.append("Відповідь допишеться в рядок журналу за сьогодні. Якщо не відповісте — нагадаю в суботу.")
     if ctx.errors:
         lines.append("")
@@ -128,5 +134,5 @@ def send_digest(ctx: Ctx, today: str) -> None:
 def send_reminder(ctx: Ctx, pending_date: str) -> None:
     ctx.tg.send(
         f"🔔 <b>Нагадування</b>: поінти за {esc(pending_date)} ще не записані.\n"
-        f"Відповідайте: <code>/log saturn 123456 unitas 7890 infinifi 4567</code>"
+        f"Відповідайте: <code>{LOG_EXAMPLE}</code>"
     )

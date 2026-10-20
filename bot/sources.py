@@ -2,11 +2,14 @@
 and raises on failure; `metrics.py` decides what to do with errors."""
 from __future__ import annotations
 
+import math
+from datetime import datetime
 from fractions import Fraction
 
 import requests
 
-from .evm import ZERO_ADDR, Chain, dec_addr_array, enc_int, enc_string, enc_uint, is_zero, same_addr
+from .evm import (ZERO_ADDR, Chain, dec_addr, dec_addr_array, dec_int, dec_uint, enc_int, enc_string, enc_uint,
+                  is_zero, same_addr)
 
 UA = {"User-Agent": "defi-monitor-bot/1.0 (+github actions)"}
 HTTP_TIMEOUT = 20
@@ -42,6 +45,18 @@ def defillama_tvl(base_url: str, slug: str, session: requests.Session | None = N
     if hist:
         return float(hist[-1]["totalLiquidityUSD"])
     raise RuntimeError(f"DefiLlama: порожня відповідь для '{slug}'")
+
+
+def defillama_coin_price(coins_url: str, chain: str, token: str, session: requests.Session | None = None) -> float:
+    """Aggregated price from coins.llama.fi (fallback when the DEX pool can't be read)."""
+    s = session or requests.Session()
+    key = f"{chain}:{token.lower()}"
+    r = s.get(f"{coins_url}/prices/current/{key}", headers=UA, timeout=HTTP_TIMEOUT)
+    r.raise_for_status()
+    coins = {k.lower(): v for k, v in (r.json().get("coins") or {}).items()}
+    if key not in coins or not coins[key].get("price"):
+        raise RuntimeError(f"DefiLlama coins: немає ціни для {key}")
+    return float(coins[key]["price"])
 
 
 def defillama_protocol_info(base_url: str, slug: str) -> dict:
@@ -229,6 +244,119 @@ def infinifi_state(chain: Chain, gateway: str, bucket_weeks: int = 13) -> dict:
     tvl, liq = out.get("tvl_onchain"), out.get("liquid_reserve")
     out["liquid_reserve_pct"] = (liq / tvl * 100) if tvl and liq is not None else None
     if all(out.get(k) is None for k in ("tvl_onchain", "queue_length", "liusd_rate")):
+        raise RuntimeError("жоден виклик не вдався: " + "; ".join(f"{k}: {v}" for k, v in out["errors"].items()))
+    return out
+
+
+# --------------------------------------------------------------------------
+# Pendle V2 market (on-chain) + Pendle API (fallback, new-market discovery)
+# --------------------------------------------------------------------------
+YEAR_SECONDS = 365 * 86400   # MarketMathCore.IMPLIED_RATE_TIME
+
+
+def pendle_pt_price(ln_implied_rate: float, seconds_to_expiry: float) -> float:
+    """PT price in the market's asset: 1 / e^(lnRate · t / year). At/after expiry PT = 1 asset."""
+    if seconds_to_expiry <= 0:
+        return 1.0
+    return math.exp(-ln_implied_rate * seconds_to_expiry / YEAR_SECONDS)
+
+
+def pendle_market_state(chain: Chain, market: str, now_ts: float) -> dict:
+    """Read a Pendle V2 market directly.
+
+    _storage() → totalPt, totalSy, lastLnImpliedRate (the rate of the last trade, 1e18);
+    implied APY = e^lnRate − 1; PT price = e^(−lnRate·t/year) in units of the asset (here trUSD);
+    liquidity (in asset) = totalSy · SY.exchangeRate + totalPt · PT price.
+    """
+    expiry = chain.uint(market, "expiry()")
+    tok = chain.call(market, "readTokens()")
+    sy, pt, yt = dec_addr(tok, 0), dec_addr(tok, 1), dec_addr(tok, 2)
+    st = chain.call(market, "_storage()")
+    total_pt, total_sy, ln_rate = dec_int(st, 0), dec_int(st, 1), dec_uint(st, 2)
+    try:
+        sy_rate = chain.uint(sy, "exchangeRate()") / WAD
+    except Exception:
+        sy_rate = 1.0       # trUSD не накопичує дохід сам по собі — SY = 1 trUSD
+    dec = chain.decimals(sy)
+    ln = ln_rate / WAD
+    left = expiry - now_ts
+    pt_price = pendle_pt_price(ln, left)
+    tp, ts = total_pt / 10 ** dec, total_sy / 10 ** dec
+    return {
+        "expiry": expiry,
+        "days_to_expiry": left / 86400,
+        "expired": left <= 0,
+        "implied_apy_pct": (math.exp(ln) - 1) * 100,
+        "pt_price": pt_price,
+        "liquidity_asset": ts * sy_rate + tp * pt_price,
+        "total_pt": tp,
+        "total_sy": ts,
+        "sy_rate": sy_rate,
+        "sy": sy, "pt": pt, "yt": yt,
+    }
+
+
+def pendle_market_api(api_url: str, chain_id: int, market: str) -> dict:
+    """Same fields from api-v2.pendle.finance (fallback if eth_call fails)."""
+    r = requests.get(f"{api_url}/v1/{chain_id}/markets/{market.lower()}", headers=UA, timeout=HTTP_TIMEOUT)
+    r.raise_for_status()
+    j = r.json()
+    expiry = datetime.fromisoformat(j["expiry"].replace("Z", "+00:00")).timestamp()
+    left = expiry - datetime.now().timestamp()
+    disc = j.get("ptDiscount")
+    return {
+        "expiry": int(expiry),
+        "days_to_expiry": left / 86400,
+        "expired": left <= 0,
+        "implied_apy_pct": float(j["impliedApy"]) * 100 if j.get("impliedApy") is not None else None,
+        "pt_price": 1 - float(disc) if disc is not None else None,
+        "liquidity_usd": float((j.get("liquidity") or {}).get("usd") or 0) or None,
+        "pt": (j.get("pt") or {}).get("address"),
+    }
+
+
+def pendle_markets_for_underlying(api_url: str, chain_id: int, underlying: str) -> list[dict]:
+    """Active Pendle markets whose underlying is `underlying` (to spot a rollover market)."""
+    r = requests.get(f"{api_url}/v1/{chain_id}/markets/active", headers=UA, timeout=HTTP_TIMEOUT)
+    r.raise_for_status()
+    out = []
+    for mk in r.json().get("markets", []):
+        ua = str(mk.get("underlyingAsset") or "").split("-", 1)[-1]
+        if ua and same_addr(ua, underlying):
+            d = mk.get("details") or {}
+            out.append({
+                "address": mk.get("address", "").lower(),
+                "name": mk.get("name"),
+                "expiry": (mk.get("expiry") or "")[:10],
+                "liquidity_usd": d.get("liquidity"),
+                "implied_apy_pct": d["impliedApy"] * 100 if d.get("impliedApy") is not None else None,
+            })
+    out.sort(key=lambda x: x["expiry"])
+    return out
+
+
+# --------------------------------------------------------------------------
+# Tori (trUSD / strUSD) — github.com/Tori-Finance/tori-contracts
+# --------------------------------------------------------------------------
+def tori_state(chain: Chain, trusd: str, strusd: str) -> dict:
+    """strUSD is an ERC-4626 vault over trUSD (StakedTrUSD.sol). Strategy losses are written off with
+    `reportLoss`, which burns trUSD held by strUSD (≤5% of the vault per 24 h) — so strUSD is the
+    first-loss buffer for plain trUSD and its exchange rate only ever drops on a reported loss."""
+    out: dict = {"errors": {}}
+
+    def read(key, fn):
+        try:
+            out[key] = fn()
+        except Exception as e:
+            out[key] = None
+            out["errors"][key] = str(e)
+
+    read("trusd_supply", lambda: chain.uint(trusd, "totalSupply()") / WAD)
+    read("strusd_rate", lambda: chain.uint(strusd, "convertToAssets(uint256)", enc_uint(WAD)) / WAD)
+    read("strusd_assets", lambda: chain.uint(strusd, "totalAssets()") / WAD)
+    sup, sa = out.get("trusd_supply"), out.get("strusd_assets")
+    out["strusd_buffer_pct"] = sa / sup * 100 if sup and sa is not None else None
+    if all(out.get(k) is None for k in ("trusd_supply", "strusd_rate", "strusd_assets")):
         raise RuntimeError("жоден виклик не вдався: " + "; ".join(f"{k}: {v}" for k, v in out["errors"].items()))
     return out
 

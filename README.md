@@ -1,6 +1,6 @@
-# defi-monitor — Telegram-бот для моніторингу Saturn / Unitas / InfiniFi
+# defi-monitor — Telegram-бот для моніторингу Saturn / Unitas / InfiniFi / Tori (Pendle trUSD)
 
-Бот раз на 15–30 хвилин збирає ціни, TVL, стан пулу Curve та InfiniFi, порівнює з порогами з `config.yaml`
+Бот раз на 15–30 хвилин збирає ціни, TVL, стан ринку Pendle trUSD (Tori) та InfiniFi, порівнює з порогами з `config.yaml`
 і надсилає алерти в Telegram. Щоп'ятниці о 10:00 за Києвом — дайджест із проханням записати поінти
 (`/log …`), у суботу — нагадування, якщо не записали. Журнал — `journal.csv`.
 
@@ -19,7 +19,7 @@
 
 - Акаунти Telegram і GitHub.
 - ~30 хвилин на кроки 1–8 (один раз).
-- Щоп'ятниці — відповісти боту трьома числами поінтів.
+- Щоп'ятниці — відповісти боту числами поінтів (Saturn, Unitas, InfiniFi, Tori Cores).
 
 ---
 
@@ -128,12 +128,24 @@ github.com → **New repository**:
 
 ---
 
+## Оновлення з v1.0 (додано Tori, прибрано пул Curve USDat)
+
+Замініть у публічному репозиторії файли `bot/*.py`, `config.yaml`, `tests/test_offline.py`, `tools/find_pools.py`
+і `README.md` (через **Add file → Upload files** — перетягніть папки `bot`, `tests`, `tools` і файли; GitHub замінить
+однойменні). Воркфлоу і секрети не змінювались. Потім **Self-test** → Run workflow: мають бути ✅ нові рядки
+«Curve frxUSD/trUSD», «Tori on-chain», «Pendle trUSD on-chain», «Pendle API», «DefiLlama tori». При наступному запуску
+монітора прийде «🔄 Бот оновлено до v1.1.0» зі статусом.
+
+Журнал не втрачається: стовпці `curve_usdat_share` / `curve_pool_liquidity` у старих рядках лишаються, нові рядки
+отримують `tori_points`, `tvl_tori`, `price_trusd`, `strusd_rate`, `pendle_pt_price`, `pendle_implied_apy`,
+`pendle_liquidity`. Порівняння «за 24 год / 7 днів» для нових метрик з'являться через добу й тиждень.
+
 ## Команди
 
 | Команда | Що робить |
 |---|---|
 | `/status` | поточні значення всіх метрик і рівень відносно порогів (✅ норма / ⚠️ увага / 🚨 тривога) |
-| `/log saturn 123456 unitas 7890 infinifi 4567` | записати поінти в рядок журналу (п'ятничний, якщо він ще без поінтів; інакше — сьогоднішній). Можна вказати не всі; `123,456` і `123 456` розпізнаються; текст «saturn 123 unitas 45» без `/log` теж приймається |
+| `/log saturn 123456 unitas 7890 infinifi 4567 tori 2500` | записати поінти в рядок журналу (п'ятничний, якщо він ще без поінтів; інакше — сьогоднішній). `tori` (або `cores`) — поінти Tori Cores. Можна вказати не всі; `123,456` і `123 456` розпізнаються; текст «saturn 123 tori 45» без `/log` теж приймається |
 | `/note текст` | дописати примітку до останнього рядка |
 | `/export` | надіслати `journal.csv` файлом + підсумок за тиждень і місяць (зручно вставити в Claude) |
 | `/thresholds` | показати пороги |
@@ -146,16 +158,21 @@ github.com → **New repository**:
 
 Два рівні — **⚠️ УВАГА** і **🚨 ТРИВОГА** — і окреме **✅ НОРМА** при поверненні. Один алерт на подію;
 поки умова тримається — повтор раз на 6 годин; при ескалації (увага → тривога) — окреме повідомлення одразу.
-Перші 7 днів (warm-up) бот лише збирає базу і шле алерти **тільки по цінах** (налаштовується).
+Перші 7 днів (warm-up) бот лише збирає базу і не шле алерти по TVL та InfiniFi (налаштовується); ціни, Pendle,
+strUSD і нагадування про погашення працюють одразу.
 Якщо нічого не відбувається — бот мовчить до п'ятничного дайджесту.
 
 | Сигнал | Увага | Тривога | Коли дізнаєтесь |
 |---|---|---|---|
-| Ціна USDat / USDu / iUSD | < $0.995 на 2 перевірках поспіль | < $0.985 (USDu < $0.98) одразу | ~1 год / до 30 хв |
-| TVL Saturn / Unitas / InfiniFi (DefiLlama) | −20% за 7 днів | −30% за 24 год | до 30 хв |
+| Ціна USDat / USDu / iUSD / trUSD | < $0.995 на 2 перевірках поспіль | < $0.985 (USDu < $0.98) одразу | ~1 год / до 30 хв |
+| TVL Saturn / Unitas / InfiniFi / Tori (DefiLlama) | −20% за 7 днів | −30% за 24 год | до 30 хв |
 | TVL Saturn | ℹ️ при > $800 млн | — | до 30 хв |
-| Пул Curve USDC/USDat: частка USDat | > 70% | > 80% | до 30 хв |
-| Пул Curve: ліквідність | −30% за 7 днів | — | до 30 хв |
+| Pendle trUSD: ціна PT (у trUSD) | −0.5% за 24 год | −1.5% за 24 год | до 30 хв |
+| Pendle trUSD: implied APY | > 30% на 2 перевірках (крім останніх 7 днів до погашення) | — | ~1 год |
+| Pendle trUSD: ліквідність ринку | −25% за 24 год або −30% за 7 днів | — | до 30 хв |
+| Pendle trUSD: погашення 26.11.2026 | ℹ️ за 14, 7 і 2 дні та в день погашення | — | — |
+| Pendle: новий ринок trUSD (для перекладу) | ℹ️ одразу, як з'явиться | — | до 24 год |
+| Tori: курс strUSD | — | будь-яке падіння (списаний збиток) | до 30 хв |
 | InfiniFi: ліквідний резерв | < 5% TVL три дні поспіль | — | через 3 дні |
 | InfiniFi: черга redemption | — | не порожня понад 48 год | через 48 год |
 | InfiniFi: exchange rate liUSD-13w | — | будь-яке падіння | до 30 хв |
@@ -169,26 +186,53 @@ GitHub іноді запускає розклад із затримкою 5–20
 Наступний запуск уже працюватиме з новими значеннями.
 
 Найчастіші правки:
-- `alerts.warmup_suppress: [tvl, curve_pool, infinifi]` — приберіть `infinifi`, якщо хочете алерти InfiniFi
+- `alerts.warmup_suppress: [tvl, infinifi]` — приберіть `infinifi`, якщо хочете алерти InfiniFi
   (падіння rate, черга) одразу, без warm-up.
+- `alerts.pendle.*` — пороги для ринку Pendle trUSD (див. «Tori на Pendle» нижче).
+- Після погашення 26.11.2026, якщо перекладете позицію в новий ринок: замініть `sources.ethereum.pendle_trusd_market`
+  і `pendle_trusd_pt` на адреси нового ринку (бот сам надішле їх, щойно ринок з'явиться).
 - `alerts.repeat_hours: 6` — частота повторів.
 - `sources.defillama.slugs.unitas: unitas-usdu` — дочірній протокол «Unitas USDu» (саме USDu, BSC + Solana).
   Батьківський `unitas` рахує разом із sUSDu та іншими продуктами.
 - Адреси пулів — у `sources.ethereum` / `sources.bsc`. Знайти найглибший пул для токена:
   `python tools/find_pools.py bsc 0xea953ea6634d55dac6697c436b1e81a679db5882`.
 
-## Звідки беруться дані (перевірено 09–12.10.2026)
+## Tori на Pendle — що і навіщо бот дивиться
+
+Позиція — у ринку Pendle **trUSD 26NOV2026** (`0xfcf0…c947`). trUSD сам дохід не нараховує (на Pendle
+`underlyingApy = 0`), тож implied APY ринку — це по суті ринкова ціна поінтів Tori Cores. Що може піти не так і як бот це ловить:
+
+- **trUSD втрачає вартість.** trUSD — синтетичний долар на дельта-нейтральних стратегіях (як USDe), погашення напряму
+  лише для whitelisted, усі інші виходять через DEX. Ціна trUSD — з пулу Curve frxUSD/trUSD (продаж 1 000 trUSD),
+  резерв — DefiLlama coins.
+- **Збиток у стратегіях Tori.** За кодом `StakedTrUSD.reportLoss` збиток списується спалюванням trUSD зі сховища strUSD
+  (не більше 5% сховища на добу) — strUSD є буфером першого збитку для trUSD. Тому будь-яке падіння курсу strUSD —
+  найраніший on-chain сигнал проблем, навіть якщо trUSD ще тримає $1. `/status` показує курс і розмір буфера.
+- **Ринок починає закладати ризик.** У нормі PT щодня трохи дорожчає до 1 trUSD. Якщо PT дешевшає за добу — хтось
+  продає PT або масово купує YT; бот повідомить і підкаже, як відрізнити одне від іншого. Implied APY перед самим
+  погашенням дуже шумний (малий рух ціни = великий стрибок APY), тому в останні 7 днів алерт по APY вимкнений.
+- **LP виходять.** Ліквідність ринку ~$1,1 млн; якщо вона тане — вихід із PT/LP стане дорожчим.
+- **Погашення.** Після 26.11.2026 позиція нічого не заробляє. Бот нагадає за 14, 7 і 2 дні, у день погашення
+  підкаже, що робити з PT/LP/YT, і раз на добу перевіряє через Pendle API, чи не з'явився новий ринок trUSD.
+
+Моніторинг пулу Curve USDC/USDat (частка USDat і ліквідність) з v1.1 прибраний; ціна USDat лишилась.
+
+## Звідки беруться дані (перевірено 09–12.10.2026; Tori — 20.10.2026)
 
 | Метрика | Джерело | Примітка |
 |---|---|---|
-| TVL ×3 | DefiLlama `api.llama.fi/tvl/<slug>` (резерв `/protocol/<slug>`) | slug-и `saturn`, `unitas-usdu`, `infinifi` |
-| Ціна USDat, частка USDat, ліквідність | Curve-пул `0xf4d0…96d7` через `eth_call` (`get_dy`, `balances`, `coins`) | продаж 1 000 USDat → ціна в USDC |
+| TVL ×4 | DefiLlama `api.llama.fi/tvl/<slug>` (резерв `/protocol/<slug>`) | slug-и `saturn`, `unitas-usdu`, `infinifi`, `tori-finance` |
+| Ціна USDat | Curve-пул `0xf4d0…96d7` через `eth_call` (`get_dy`) | продаж 1 000 USDat → ціна в USDC |
 | Ціна USDu | PancakeSwap V3 USDu/USDT 0.01% `0x8aab…2120`, `slot0()` через `eth_call` | резерв — GeckoTerminal; ліквідність ~$0.7 млн |
 | Ціна iUSD | Curve iUSD/USDC `0x2e2d…986e`, `get_dy` на 100 iUSD | **пул ~$8–10 тис.** — ціна індикативна; дивіться також курс погашення у `/status` |
+| Ціна trUSD | Curve frxUSD/trUSD `0xd1d9…6ff`, `get_dy` на 1 000 trUSD | ціна у frxUSD; резерв — `coins.llama.fi`. Найбільший обіг trUSD — на Fluid (USDC), але Fluid DEX бот не читає |
+| PT-trUSD, implied APY, ліквідність ринку, дні до погашення | Pendle-ринок `0xfcf0…c947`: `expiry()`, `readTokens()`, `_storage()` (totalPt, totalSy, lastLnImpliedRate), SY `exchangeRate()` | APY = e^lnRate − 1; PT = e^(−lnRate·t/рік); резерв — `api-v2.pendle.finance` |
+| Курс strUSD, буфер strUSD, trUSD в обігу | strUSD `0x2808…5815` (ERC-4626): `convertToAssets(1e18)`, `totalAssets()`; trUSD `0xd058…1697`: `totalSupply()` | буфер = trUSD у strUSD / весь trUSD |
+| Нові ринки trUSD | `api-v2.pendle.finance/core/v1/1/markets/active`, фільтр за underlying trUSD | раз на добу |
 | Rate liUSD-13w, резерв, черга, курс погашення, unaccrued yield | On-chain через Gateway `0x3f04…25b5`: `getAddress("lockingController").exchangeRate(13)`, `redeemController.queueLength()` / `totalEnqueuedRedemptions()` / `receiptToAsset()`, `accounting.totalAssetsValue()` / `totalAssetsValueOf(LIQUID)` | публічного API в InfiniFi немає — docs відсилають до приватного репо; on-chain дає ті самі числа |
 
 Self-test перевіряє всі джерела і додатково звіряє, що `shareToken(13)` у LockingController дорівнює адресі
-liUSD-13w з docs.
+liUSD-13w з docs, PT з `readTokens()` ринку Pendle — адресі `pendle_trusd_pt`, а `strUSD.asset()` — адресі trUSD.
 
 ## Що публічне, а що ні
 
@@ -198,7 +242,7 @@ liUSD-13w з docs.
 
 Ніхто не бачить: `journal.csv` з поінтами, `history.csv`, `state.json` (усе в приватному `defi-monitor-data`),
 секрети. Єдине, що лишається видимим і стосується вас: той, хто знайде репо, зрозуміє, що власник акаунта
-цікавиться цими трьома протоколами. Якщо й це зайве — створіть публічне репо з окремого анонімного акаунта.
+цікавиться цими протоколами. Якщо й це зайве — створіть публічне репо з окремого анонімного акаунта.
 
 ## Якщо щось не працює
 
@@ -211,6 +255,9 @@ liUSD-13w з docs.
 | Self-test: ❌ Ethereum RPC / BSC RPC | вузол тимчасово лежить або невірний URL у секреті; бот сам перемикається на резервні публічні вузли |
 | ❌ Curve … «Токен не знайдено в пулі» | адреса пулу або токена змінилась — знайдіть пул через `tools/find_pools.py` |
 | ❌ InfiniFi «адресу не знайдено в Gateway» | адреса Gateway змінилась — перевірте https://docs.infinifi.xyz/dev-docs/contracts.md |
+| ❌ Pendle trUSD on-chain / «PT … НІ» | адреса ринку в `pendle_trusd_market` не та; візьміть її з app.pendle.finance (URL сторінки ринку) або з алерту про новий ринок |
+| ❌ Curve frxUSD/trUSD | пул спорожнів або змінився — бот бере ціну з DefiLlama coins; новий пул: `python tools/find_pools.py eth 0xd0580192E98eA6CEB9c7b6191Ed2E27560911697` |
+| ❌ Pendle API | не критично: це лише резерв і пошук нових ринків, основні дані — on-chain |
 | Бот не відповідає на команди | натисніть Start у чаті з ботом; перевірте `TELEGRAM_CHAT_ID`; зачекайте наступного запуску |
 | Telegram-помилка 409 Conflict у логах | два боти з одним токеном (старий репозиторій не видалений або працює `loop` на сервері) — залиште один |
 | Алерт «Джерело даних не відповідає» | подивіться текст помилки; якщо тимчасово — само відновиться і прийде ✅ |
@@ -248,9 +295,9 @@ defi-monitor/
 │   ├── run.py           # точка входу: monitor | weekly | selftest | status | loop
 │   ├── config.py        # config.yaml + секрети з env
 │   ├── evm.py           # eth_call через JSON-RPC без web3; селектори обчислені keccak256; ключі маскуються
-│   ├── sources.py       # DefiLlama, Curve, PancakeSwap V3, InfiniFi on-chain, GeckoTerminal
+│   ├── sources.py       # DefiLlama, Curve, PancakeSwap V3, InfiniFi on-chain, Pendle, Tori, GeckoTerminal
 │   ├── metrics.py       # збір усіх метрик, стійкий до падіння окремого джерела
-│   ├── alerts.py        # пороги, ескалація, антиспам, warm-up, «норма»
+│   ├── alerts.py        # пороги, ескалація, антиспам, warm-up, «норма», погашення Pendle
 │   ├── commands.py      # /status /log /note /export /thresholds /help
 │   ├── weekly.py        # п'ятничний дайджест і суботнє нагадування
 │   ├── storage.py       # state.json, history.csv, journal.csv

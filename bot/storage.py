@@ -10,13 +10,16 @@ from pathlib import Path
 from .metrics import METRIC_KEYS
 
 JOURNAL_COLUMNS = [
-    "date", "saturn_points", "unitas_points", "infinifi_points",
-    "tvl_saturn", "tvl_unitas", "tvl_infinifi",
-    "price_usdat", "price_usdu", "price_iusd",
-    "liusd13w_rate", "infinifi_liquid_reserve", "curve_usdat_share", "curve_pool_liquidity",
+    "date", "saturn_points", "unitas_points", "infinifi_points", "tori_points",
+    "tvl_saturn", "tvl_unitas", "tvl_infinifi", "tvl_tori",
+    "price_usdat", "price_usdu", "price_iusd", "price_trusd",
+    "liusd13w_rate", "infinifi_liquid_reserve",
+    "strusd_rate", "pendle_pt_price", "pendle_implied_apy", "pendle_liquidity",
     "note",
 ]
-POINTS_COLUMNS = ["saturn_points", "unitas_points", "infinifi_points"]
+POINTS_COLUMNS = ["saturn_points", "unitas_points", "infinifi_points", "tori_points"]
+MONEY_COLUMNS = ("infinifi_liquid_reserve", "pendle_liquidity")
+RATE_COLUMNS = ("liusd13w_rate", "strusd_rate", "pendle_pt_price")   # тут важливий 7-й знак
 
 
 def utcnow() -> datetime:
@@ -55,6 +58,11 @@ DEFAULT_STATE = {
     "liusd_rate_watermark": None,
     "last_metrics": {},
     "last_run": None,
+    "maturity_sent": {},         # pendle market -> ["14", "7", "2", "expired"]
+    "pendle_trusd_markets": [],  # active trUSD markets from the Pendle API (refreshed daily)
+    "pendle_known_markets": [],  # markets already announced as «new»
+    "pendle_markets_checked_at": None,
+    "pendle_markets_seeded": False,
     "weekly": {"digest_sent_date": None, "reminder_sent_date": None, "pending_points_date": None},
 }
 
@@ -144,18 +152,31 @@ def load_journal(path: str) -> list[dict]:
     with open(p, "r", encoding="utf-8", newline="") as fh:
         rows = [dict(r) for r in csv.DictReader(fh)]
     for r in rows:
+        r.pop(None, None)                 # хвости рядків без заголовка
         for c in JOURNAL_COLUMNS:
             r.setdefault(c, "")
     return rows
 
 
+def journal_fieldnames(rows: list[dict]) -> list[str]:
+    """Current columns + any old ones still present in the file (e.g. curve_usdat_share from
+    before v1.1) — dropped metrics stop being filled, but past values are never deleted."""
+    extra: list[str] = []
+    for r in rows:
+        for k in r:
+            if k and k not in JOURNAL_COLUMNS and k not in extra and any(x.get(k) for x in rows):
+                extra.append(k)
+    return JOURNAL_COLUMNS + extra
+
+
 def save_journal(path: str, rows: list[dict]) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
+    fields = journal_fieldnames(rows)
     with open(path, "w", encoding="utf-8", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=JOURNAL_COLUMNS, extrasaction="ignore")
+        w = csv.DictWriter(fh, fieldnames=fields, extrasaction="ignore")
         w.writeheader()
         for r in rows:
-            w.writerow({c: r.get(c, "") for c in JOURNAL_COLUMNS})
+            w.writerow({c: r.get(c, "") for c in fields})
 
 
 def journal_row_from_metrics(date_str: str, metrics: dict) -> dict:
@@ -164,8 +185,8 @@ def journal_row_from_metrics(date_str: str, metrics: dict) -> dict:
     for c in JOURNAL_COLUMNS:
         if c in metrics and metrics[c] is not None:
             v = metrics[c]
-            row[c] = f"{v:.2f}" if c.startswith("tvl_") or c in ("infinifi_liquid_reserve", "curve_pool_liquidity") \
-                else f"{v:.6g}"
+            row[c] = (f"{v:.2f}" if c.startswith("tvl_") or c in MONEY_COLUMNS
+                      else f"{v:.8g}" if c in RATE_COLUMNS else f"{v:.6g}")
     return row
 
 

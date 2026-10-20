@@ -105,6 +105,48 @@ class TestPoolMath(unittest.TestCase):
         self.assertAlmostEqual(c["share_pct"], 3_500_000 * 0.9985 / (3_200_000 + 3_500_000 * 0.9985) * 100, places=3)
 
 
+    def test_pendle_market_matches_api_snapshot(self):
+        """Numbers from api-v2.pendle.finance for the trUSD 26NOV2026 market on 20.10.2026 11:39 UTC:
+        totalPt 262 394.79, totalSy 867 604.89, impliedApy 9.987%, ptDiscount 0.94779%, liquidity 1 127 512.7 trUSD."""
+        import math
+        market, sy, pt, yt = "0x" + "ab" * 20, "0x" + "a1" * 20, "0x" + "a2" * 20, "0x" + "a3" * 20
+        expiry = int(datetime(2026, 11, 26, tzinfo=UTC).timestamp())
+        now = datetime(2026, 10, 20, 11, 39, 30, tzinfo=UTC).timestamp()
+        ln = int(math.log(1.0998713034760497) * 1e18)
+        st = word(int(262_394.7885067771 * 1e18)) + evm.enc_uint(int(867_604.8945807992 * 1e18)) + evm.enc_uint(ln) \
+            + evm.enc_uint(5) + evm.enc_uint(10) + evm.enc_uint(10)
+        chain = FakeChain({
+            (market, "expiry()"): word(expiry),
+            (market, "readTokens()"): addr_word(sy) + evm.enc_addr(pt) + evm.enc_addr(yt),
+            (market, "_storage()"): st,
+            (sy, "exchangeRate()"): word(10 ** 18),
+            (sy, "decimals()"): word(18),
+        })
+        r = sources.pendle_market_state(chain, market, now)
+        self.assertAlmostEqual(r["implied_apy_pct"], 9.98713, places=3)
+        self.assertAlmostEqual(1 - r["pt_price"], 0.0094779, places=5)
+        self.assertAlmostEqual(r["liquidity_asset"], 1_127_512.7, delta=5)
+        self.assertAlmostEqual(r["days_to_expiry"], 36.51, places=1)
+        self.assertFalse(r["expired"])
+        self.assertEqual(r["pt"], pt)
+        # after expiry PT = 1 trUSD
+        r = sources.pendle_market_state(chain, market, expiry + 60)
+        self.assertEqual(r["pt_price"], 1.0)
+        self.assertTrue(r["expired"])
+
+    def test_tori_state(self):
+        trusd, strusd = "0x" + "d0" * 20, "0x" + "28" * 20
+        chain = FakeChain({
+            (trusd, "totalSupply()"): word(71_560_000 * 10 ** 18),
+            (strusd, "convertToAssets(uint256)"): word(1_012_345_678_000_000_000),
+            (strusd, "totalAssets()"): word(37_500_000 * 10 ** 18),
+        })
+        t = sources.tori_state(chain, trusd, strusd)
+        self.assertAlmostEqual(t["strusd_rate"], 1.012345678)
+        self.assertAlmostEqual(t["strusd_buffer_pct"], 37.5 / 71.56 * 100)
+        self.assertEqual(t["errors"], {})
+
+
 # --------------------------------------------------------------------------
 def base_metrics(**over) -> dict:
     m = {k: None for k in storage.METRIC_KEYS}
@@ -114,8 +156,11 @@ def base_metrics(**over) -> dict:
         "liusd13w_rate": 1.08, "infinifi_tvl_onchain": 52.4e6, "infinifi_liquid_reserve": 4.1e6,
         "infinifi_liquid_reserve_pct": 7.8, "infinifi_queue_length": 0, "infinifi_queue_iusd": 0,
         "iusd_redeem_rate": 1.0, "infinifi_unaccrued_yield": 12.0,
-        "curve_usdat_share": 52.0, "curve_pool_liquidity": 6.7e6, "curve_usdc_balance": 3.2e6,
-        "curve_usdat_balance": 3.5e6, "usdu_pool_liquidity": 7e5, "curve_iusd_liquidity": 1e4,
+        "usdu_pool_liquidity": 7e5, "curve_iusd_liquidity": 1e4,
+        "tvl_tori": 71.5e6, "price_trusd": 0.9996, "trusd_pool_liquidity": 3e6,
+        "pendle_pt_price": 0.99052, "pendle_pt_price_usd": 0.99015, "pendle_implied_apy": 9.99,
+        "pendle_liquidity": 1.127e6, "pendle_days_to_expiry": 36.5,
+        "strusd_rate": 1.0123, "strusd_buffer_pct": 52.0, "trusd_supply": 71.5e6,
     })
     m.update(over)
     return m
@@ -176,16 +221,83 @@ class TestAlerts(unittest.TestCase):
         self.assertEqual(len(msgs), 1)
         self.assertIn("НОРМА", msgs[0])
 
-    def test_curve_share_and_liquidity(self):
+    def test_pendle_pt_drop_apy_liquidity(self):
         st = fresh_state(T0 - timedelta(days=30))
-        hist = [{"ts": T0 - timedelta(days=7), **base_metrics(curve_pool_liquidity=10e6)}]
-        msgs = self.run_engine(st, base_metrics(curve_usdat_share=72.0, curve_pool_liquidity=6.5e6), T0, hist)
-        self.assertEqual(len(msgs), 2)
-        self.assertTrue(any("Частка USDat" in x and "УВАГА" in x for x in msgs))
-        self.assertTrue(any("Ліквідність пулу" in x and "35.0%" in x for x in msgs))
-        msgs = self.run_engine(st, base_metrics(curve_usdat_share=81.0, curve_pool_liquidity=6.5e6), T0 + timedelta(hours=1), hist)
+        hist = [{"ts": T0 - timedelta(hours=24), **base_metrics()},
+                {"ts": T0 - timedelta(days=7), **base_metrics(pendle_liquidity=1.2e6)}]
+        # PT −0.6% за 24 год → увага
+        msgs = self.run_engine(st, base_metrics(pendle_pt_price=0.99052 * 0.994), T0, hist)
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("PT-trUSD подешевшав", msgs[0])
+        self.assertIn("УВАГА", msgs[0])
+        # −2% → ескалація до тривоги
+        msgs = self.run_engine(st, base_metrics(pendle_pt_price=0.99052 * 0.98), T0 + timedelta(minutes=30), hist)
         self.assertEqual(len(msgs), 1)
         self.assertIn("ТРИВОГА", msgs[0])
+        self.assertIn("ескалація", msgs[0])
+        # пропуск в історії не дає хибної «норми»
+        msgs = self.run_engine(st, base_metrics(pendle_pt_price=0.97), T0 + timedelta(hours=10), hist)
+        self.assertEqual(msgs, [])
+        # відновлення
+        msgs = self.run_engine(st, base_metrics(), T0 + timedelta(hours=10, minutes=30),
+                               [{"ts": T0 - timedelta(hours=14), **base_metrics()}])
+        self.assertTrue(any("НОРМА" in x and "PT-trUSD" in x for x in msgs))
+
+        # implied APY > 30% на двох перевірках; останній тиждень — вимкнено
+        st = fresh_state(T0 - timedelta(days=30))
+        self.assertEqual(self.run_engine(st, base_metrics(pendle_implied_apy=45.0), T0), [])
+        msgs = self.run_engine(st, base_metrics(pendle_implied_apy=45.0), T0 + timedelta(minutes=30))
+        self.assertTrue(any("Implied APY" in x and "УВАГА" in x for x in msgs))
+        msgs = self.run_engine(st, base_metrics(pendle_implied_apy=80.0, pendle_days_to_expiry=3), T0 + timedelta(hours=1))
+        self.assertFalse(any("Implied APY" in x for x in msgs))
+        self.assertFalse(st["alerts"]["pendle_apy"]["active"])
+
+        # ліквідність ринку −30% за 24 год → увага
+        st = fresh_state(T0 - timedelta(days=30))
+        hist = [{"ts": T0 - timedelta(hours=24), **base_metrics(pendle_liquidity=1.6e6)}]
+        msgs = self.run_engine(st, base_metrics(pendle_liquidity=1.1e6), T0, hist)
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("Ліквідність ринку Pendle trUSD", msgs[0])
+
+    def test_maturity_reminders_and_new_market(self):
+        st = fresh_state(T0 - timedelta(days=30))
+        self.assertEqual(self.run_engine(st, base_metrics(pendle_days_to_expiry=20), T0), [])
+        msgs = self.run_engine(st, base_metrics(pendle_days_to_expiry=13.9), T0 + timedelta(hours=1))
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("погашається", msgs[0])
+        self.assertEqual(self.run_engine(st, base_metrics(pendle_days_to_expiry=13.8), T0 + timedelta(hours=2)), [])
+        # бот лежав тиждень: 7 і 2 дні перетнуто разом → одне нагадування
+        msgs = self.run_engine(st, base_metrics(pendle_days_to_expiry=1.5), T0 + timedelta(days=12))
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(self.run_engine(st, base_metrics(pendle_days_to_expiry=1.4), T0 + timedelta(days=12, hours=1)), [])
+        # новий ринок з'явився
+        st["pendle_trusd_markets"] = [
+            {"address": self.cfg["sources"]["ethereum"]["pendle_trusd_market"].lower(), "expiry": "2026-11-26"},
+            {"address": "0x" + "12" * 20, "expiry": "2027-02-25", "implied_apy_pct": 12.0, "liquidity_usd": 5e5}]
+        msgs = self.run_engine(st, base_metrics(pendle_days_to_expiry=1.3), T0 + timedelta(days=12, hours=2))
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("новий ринок trUSD", msgs[0])
+        self.assertIn("2027-02-25", msgs[0])
+        # погашення: одне повідомлення з посиланням на новий ринок, алерти Pendle замовкли
+        st["alerts"]["pendle_pt"] = {"active": True, "level": "warn", "since": storage.iso(T0), "last_sent": storage.iso(T0)}
+        msgs = self.run_engine(st, base_metrics(pendle_days_to_expiry=-0.01, pendle_implied_apy=None), T0 + timedelta(days=14))
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("погашено", msgs[0])
+        self.assertIn("2027-02-25", msgs[0])
+        self.assertFalse(st["alerts"]["pendle_pt"]["active"])
+        self.assertEqual(self.run_engine(st, base_metrics(pendle_days_to_expiry=-1), T0 + timedelta(days=15)), [])
+
+    def test_strusd_rate_drop_and_trusd_price(self):
+        st = fresh_state(T0 - timedelta(days=30))
+        self.run_engine(st, base_metrics(), T0)
+        msgs = self.run_engine(st, base_metrics(strusd_rate=1.0100), T0 + timedelta(minutes=30))
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("Курс strUSD", msgs[0])
+        self.assertIn("ТРИВОГА", msgs[0])
+        self.assertEqual(self.run_engine(st, base_metrics(strusd_rate=1.0100), T0 + timedelta(hours=1)), [])
+        # trUSD: тривога одразу нижче 0.985
+        msgs = self.run_engine(st, base_metrics(strusd_rate=1.0100, price_trusd=0.98), T0 + timedelta(hours=2))
+        self.assertTrue(any("trUSD = <b>$0.9800</b>" in x and "ТРИВОГА" in x for x in msgs))
 
     def test_infinifi_reserve_queue_rate(self):
         st = fresh_state(T0 - timedelta(days=30))
@@ -255,12 +367,17 @@ class TestCommandsAndWeekly(unittest.TestCase):
                          {"saturn_points": 123456.0, "unitas_points": 7890.0, "infinifi_points": 4567.0})
         self.assertEqual(commands.parse_points("Saturn=1,5 inf: 10"), {"saturn_points": 1.5, "infinifi_points": 10.0})
         self.assertEqual(commands.parse_points("hello"), {})
+        self.assertEqual(commands.parse_points("tori 2 500 cores"), {"tori_points": 2500.0})
+        self.assertEqual(commands.parse_points("cores=12,345"), {"tori_points": 12345.0})
 
     def test_digest_then_log_then_reminder(self):
         friday = datetime(2026, 10, 23, 7, 10, tzinfo=UTC)  # 10:10 Kyiv (EEST)
         c = self.ctx(friday)
         self.assertEqual(weekly.run_weekly(c), "digest")
         self.assertIn("Тижневий дайджест", self.tg.sent[-1])
+        self.assertIn("Pendle trUSD", self.tg.sent[-1])
+        self.assertIn("tori 2500", self.tg.sent[-1])
+        self.assertNotIn("Curve USDC/USDat", self.tg.sent[-1])
         rows = storage.load_journal(self.cfg["files"]["journal"])
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["date"], "2026-10-23")
@@ -278,10 +395,12 @@ class TestCommandsAndWeekly(unittest.TestCase):
         # user logs on Sunday -> fills Friday's row
         sun = commands.Ctx(cfg=self.cfg, state=c.state, tg=self.tg, now=datetime(2026, 10, 25, 9, 0, tzinfo=UTC))
         sun.metrics, sun.errors, sun.history = base_metrics(), {}, []
-        reply = commands.dispatch(sun, "/log saturn 100 unitas 200 infinifi 300")
+        reply = commands.dispatch(sun, "/log saturn 100 unitas 200 infinifi 300 tori 400")
         self.assertIn("2026-10-23", reply)
+        self.assertIn("Tori (Cores): <b>400</b>", reply)
         rows = storage.load_journal(self.cfg["files"]["journal"])
         self.assertEqual(rows[0]["saturn_points"], "100")
+        self.assertEqual(rows[0]["tori_points"], "400")
         self.assertIsNone(c.state["weekly"]["pending_points_date"])
         # a later /log on a new day creates a new row and shows the delta
         nxt = commands.Ctx(cfg=self.cfg, state=c.state, tg=self.tg, now=datetime(2026, 10, 30, 9, 0, tzinfo=UTC))
@@ -296,8 +415,12 @@ class TestCommandsAndWeekly(unittest.TestCase):
         self.assertIn("Поінти Saturn", reply)
         self.assertTrue(any("[document" in s for s in self.tg.sent))
         # /status and /thresholds render without errors
-        self.assertIn("Статус", commands.dispatch(nxt, "/status"))
-        self.assertIn("Пороги", commands.dispatch(nxt, "/thresholds"))
+        status = commands.dispatch(nxt, "/status")
+        self.assertIn("Статус", status)
+        self.assertIn("Tori · Pendle trUSD", status)
+        self.assertIn("через 36 дн.", status)
+        self.assertNotIn("Частка USDat", status)
+        self.assertIn("Pendle trUSD", commands.dispatch(nxt, "/thresholds"))
 
     def test_winter_time_hour_selection(self):
         # January: Kyiv = UTC+2, so 07:00 UTC is 09:00 (idle) and 08:00 UTC is 10:00 (digest)
@@ -306,6 +429,27 @@ class TestCommandsAndWeekly(unittest.TestCase):
         fri8 = commands.Ctx(cfg=self.cfg, state=fri7.state, tg=self.tg, now=datetime(2027, 1, 15, 8, 2, tzinfo=UTC))
         fri8.metrics, fri8.errors, fri8.history = base_metrics(), {}, []
         self.assertEqual(weekly.run_weekly(fri8), "digest")
+
+    def test_journal_keeps_old_columns(self):
+        """journal.csv from v1.0 had curve_* columns: values stay, new columns are added."""
+        p = self.cfg["files"]["journal"]
+        with open(p, "w", encoding="utf-8", newline="") as fh:
+            fh.write("date,saturn_points,unitas_points,infinifi_points,tvl_saturn,tvl_unitas,tvl_infinifi,"
+                     "price_usdat,price_usdu,price_iusd,liusd13w_rate,infinifi_liquid_reserve,curve_usdat_share,"
+                     "curve_pool_liquidity,note\n"
+                     "2026-10-16,100,200,300,1,2,3,0.999,0.998,0.997,1.08,4100000,52.1,6700000.00,перший\n")
+        nxt = self.ctx(datetime(2026, 10, 23, 9, 0, tzinfo=UTC))
+        commands.dispatch(nxt, "/log saturn 150 tori 10")
+        with open(p, encoding="utf-8") as fh:
+            header = fh.readline().strip().split(",")
+        self.assertIn("tori_points", header)
+        self.assertIn("curve_usdat_share", header)
+        rows = storage.load_journal(p)
+        self.assertEqual(rows[0]["curve_usdat_share"], "52.1")
+        self.assertEqual(rows[0]["note"], "перший")
+        self.assertEqual(rows[1]["tori_points"], "10")
+        self.assertEqual(rows[1]["curve_usdat_share"], "")
+        self.assertEqual(rows[1]["price_trusd"], "0.9996")
 
     def test_history_roundtrip(self):
         p = self.cfg["files"]["history"]

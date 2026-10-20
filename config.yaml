@@ -16,7 +16,7 @@ weekly:
 alerts:
   repeat_hours: 6       # повтор алерту, поки умова тримається
   warmup_days: 7        # перші N днів збираємо базу, алерти шлемо лише по цінах
-  warmup_suppress: [tvl, curve_pool, infinifi]   # що глушити під час warm-up
+  warmup_suppress: [tvl, infinifi]   # що глушити під час warm-up (ціни, Pendle і погашення — ніколи)
   source_error_runs: 3  # повідомити, якщо джерело не відповідає N запусків поспіль
 
   price:
@@ -26,16 +26,25 @@ alerts:
       usdat: 0.985
       usdu: 0.98
       iusd: 0.985
+      trusd: 0.985            # trUSD — синтетичний долар (дельта-нейтральні стратегії), як USDe
 
   tvl:
     warn_drop_7d_pct: 20      # увага: −20% за 7 днів
     alarm_drop_24h_pct: 30    # тривога: −30% за 24 години
     saturn_high_usd: 800000000  # окреме повідомлення, коли TVL Saturn > $800 млн
 
-  curve_pool:
-    usdat_share_warn_pct: 70
-    usdat_share_alarm_pct: 80
+  pendle:                     # ринок Pendle trUSD (sources.ethereum.pendle_trusd_market)
+    pt_drop_24h_warn_pct: 0.5   # PT-trUSD подешевшав (у trUSD) на 0.5% за 24 год → увага
+    pt_drop_24h_alarm_pct: 1.5  # … на 1.5% → тривога. У нормі PT щодня лише дорожчає до 1.0
+    implied_apy_warn_pct: 30    # implied APY > 30% на двох перевірках поспіль → увага
+    apy_ignore_last_days: 7     # за 7 днів до погашення APY стає шумним — алерт по APY вимкнено
+    liquidity_drop_24h_warn_pct: 25
     liquidity_drop_7d_warn_pct: 30
+    maturity_remind_days: [14, 7, 2]   # нагадати про погашення за N днів (+ у день погашення)
+    new_market_check_hours: 24  # як часто шукати новий ринок trUSD на Pendle (для перекладу після погашення)
+
+  tori:
+    rate_drop_tolerance: 0.000001   # будь-яке падіння курсу strUSD (= списаний збиток) → тривога
 
   infinifi:
     reserve_warn_pct: 5       # ліквідний резерв < 5% TVL …
@@ -51,6 +60,8 @@ sources:
       saturn: saturn
       unitas: unitas-usdu     # дочірній протокол «Unitas USDu»; батьківський (BSC+Solana разом) — unitas
       infinifi: infinifi
+      tori: tori-finance      # перевірено 20.10.2026: Tori Finance, Basis Trading, Ethereum
+    coins_url: https://coins.llama.fi   # резервна ціна trUSD
 
   rpc:
     # Публічні RPC за замовчуванням. Якщо задати секрети ETH_RPC_URL / BSC_RPC_URL,
@@ -65,12 +76,18 @@ sources:
   ethereum:
     usdc_token:        "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
     usdat_token:       "0x23238f20b894f29041f48d88ee91131c395aaa71"
-    curve_usdat_pool:  "0xf4d0cf32908b2c7f1021339c43df0f77f06896d7"   # Curve USDC/USDat
+    curve_usdat_pool:  "0xf4d0cf32908b2c7f1021339c43df0f77f06896d7"   # Curve USDC/USDat (лише ціна USDat)
     iusd_token:        "0x48f9e38f3070AD8945DFEae3FA70987722E3D89c"
     curve_iusd_pool:   "0x2e2d6c119bdf226c420cb40e3b9fc9689cf5986e"   # Curve iUSD/USDC (~$10K ліквідності!)
     infinifi_gateway:  "0x3f04b65Ddbd87f9CE0A2e7Eb24d80e7fb87625b5"   # Gateway V1 (docs.infinifi.xyz)
     liusd13w_token:    "0xbd3f9814eB946E617f1d774A6762cDbec0bf087A"   # для self-test
     liusd_bucket_weeks: 13
+    # Tori (перевірено 20.10.2026: DefiLlama, CoinGecko, Pendle API, github.com/Tori-Finance/tori-contracts)
+    trusd_token:       "0xd0580192E98eA6CEB9c7b6191Ed2E27560911697"
+    strusd_token:      "0x280839980a7eD0D7717F64125fE241012E5F5815"   # Staked trUSD, ERC-4626, cooldown 7 дн
+    curve_trusd_pool:  "0xd1d954bc94c843815ec7b8119f2de00af27fa6ff"   # Curve frxUSD/trUSD (ціна trUSD у frxUSD)
+    pendle_trusd_market: "0xfcf009cb3135da12a6eb1f73f3ee05392a7bc947" # Pendle trUSD 26NOV2026
+    pendle_trusd_pt:   "0x7191878f1fe834b28f4d0cead0e4375b814c4abb"   # PT-trUSD-26NOV2026 (для self-test)
 
   bsc:
     usdu_token:        "0xea953ea6634d55dac6697c436b1e81a679db5882"
@@ -82,6 +99,11 @@ sources:
   probe_amounts:
     usdat: 1000
     iusd: 100
+    trusd: 1000             # пул frxUSD/trUSD має ~$60 тис. глибини на ±2% — 1000 ок
+
+  pendle:
+    api_url: https://api-v2.pendle.finance/core   # резерв для ринку + пошук нових ринків trUSD
+    chain_id: 1
 
   geckoterminal:
     base_url: https://api.geckoterminal.com/api/v2   # резерв для ціни USDu і для tools/find_pools.py

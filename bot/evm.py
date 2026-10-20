@@ -39,6 +39,15 @@ SEL = {
     "farmRegistry()": "0x87418e4a",
     "getTypeFarms(uint256)": "0xc108e2c4",
     "assets()": "0x71a97305",
+    # Pendle V2 market / SY (pendle-core-v2-public, PendleMarketV7.sol)
+    "expiry()": "0xe184c9be",
+    "readTokens()": "0x2c8ce6bc",
+    "_storage()": "0xc3fb90d6",          # (int128 totalPt, int128 totalSy, uint96 lastLnImpliedRate, uint16×3)
+    "exchangeRate()": "0x3ba0b9a9",      # SY → asset, 1e18
+    # ERC-4626 (Tori strUSD = StakedTrUSD.sol)
+    "convertToAssets(uint256)": "0x07a2d13a",
+    "totalAssets()": "0x01e1d114",
+    "asset()": "0x38d52e0f",
 }
 ZERO_ADDR = "0x" + "0" * 40
 
