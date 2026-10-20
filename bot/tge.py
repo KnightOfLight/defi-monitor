@@ -1,8 +1,10 @@
 """TGE / airdrop announcements.
 
 Projects announce on X, which has no free API, so the bot reads what reaches the open web within hours:
-  * Google News RSS search per project — crypto media and exchange-listing posts re-publish X announcements;
-  * public Telegram channels through the t.me/s/<channel> web preview (default: Wu Blockchain);
+  * Google News and Bing News RSS search per project — crypto media (KuCoin flash, ChainCatcher, …) and
+    exchange-listing posts re-publish X announcements; Bing indexes more of the small crypto sites;
+  * public Telegram channels through the t.me/s/<channel> web preview: news (Wu Blockchain, Foresight News,
+    BlockBeats) and exchange announcements (Binance, Bybit) — checked every run, they post fast;
   * new pages in the project docs (sitemap.xml) whose path mentions token / tge / airdrop / claim / …
 A news item is reported when it names the project AND contains a TGE keyword. The first pass of every
 source is silent: whatever already exists is remembered, only later additions are sent.
@@ -19,7 +21,7 @@ import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
 from datetime import date, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
-from urllib.parse import quote_plus, urlsplit
+from urllib.parse import quote_plus, unquote, urlsplit
 from zoneinfo import ZoneInfo
 
 import requests
@@ -30,10 +32,13 @@ from .telegram import esc
 UA = {"User-Agent": "Mozilla/5.0 (compatible; defi-monitor-bot/1.1; +github actions)"}
 TIMEOUT = 15
 GNEWS_URL = "https://news.google.com/rss/search?q={q}&hl=en-US&gl=US&ceid=US:en"
+BING_URL = "https://www.bing.com/news/search?q={q}&format=rss&setlang=en-US&cc=US"
 LANGS = {"en", "es", "hi", "id", "ja", "ko", "vi", "zh", "zh-hans", "zh-hant", "zh-cn", "zh-tw", "pt", "pt-br",
          "fr", "de", "ru", "tr", "uk", "it", "pl", "ar", "th", "cn", "tw"}
+# слова у шляху нової сторінки документації; «governance» навмисно немає — це цілі розділи
+# (Saturn: /operations-and-governance/…, infiniFi: /dev-docs/governance/…), а не анонс токена
 DOC_WORDS = {"token", "tokens", "tokenomics", "tge", "airdrop", "claim", "claims", "season", "snapshot",
-             "distribution", "rewards", "governance", "allocation", "vesting"}
+             "distribution", "allocation", "vesting"}
 
 _MONTHS = ("jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|"
            "sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?")
@@ -50,7 +55,9 @@ _DATE_RES = [
 # matching helpers
 # --------------------------------------------------------------------------
 def _term_re(term: str) -> re.Pattern:
-    return re.compile(r"(?<!\w)" + re.escape(term) + r"(?!\w)", re.I)     # «$INFI» теж збігається з INFI
+    # межі слова лише по латиниці/цифрах: «$INFI» і «协议infiniFi宣布» збігаються, «INFINITY» — ні;
+    # китайські ключові слова (空投 …) шукаються як підрядок
+    return re.compile(r"(?<![A-Za-z0-9_])" + re.escape(term) + r"(?![A-Za-z0-9_])", re.I)
 
 
 def hits(text: str, terms: list[str]) -> list[str]:
@@ -74,7 +81,11 @@ def _strip_tags(s: str) -> str:
 
 def _norm_title(t: str) -> str:
     t = re.sub(r"\s+-\s+[^-]{2,60}$", "", t or "")          # Google News appends " - Source"
-    return re.sub(r"[^a-z0-9]+", " ", t.lower()).strip()
+    return re.sub(r"[\W_]+", " ", t.lower()).strip()       # \W з Unicode: китайські заголовки не злипаються в ""
+
+
+def hid_title(t: str) -> str:
+    return _hid(_norm_title(t))
 
 
 def _hid(*parts: str) -> str:
@@ -84,33 +95,53 @@ def _hid(*parts: str) -> str:
 # --------------------------------------------------------------------------
 # fetchers (each returns plain dicts, raises on failure)
 # --------------------------------------------------------------------------
+def _kw_group(keywords: list[str]) -> str:
+    return " OR ".join(f'"{k}"' if " " in k else k for k in keywords if k.isascii())
+
+
 def google_news(query: str, keywords: list[str], days: int = 14, session=None) -> list[dict]:
-    kw = " OR ".join(f'"{k}"' if " " in k else k for k in keywords)
-    q = f"{query} ({kw}) when:{days}d"
+    q = f"{query} ({_kw_group(keywords)}) when:{days}d"
     r = (session or requests).get(GNEWS_URL.format(q=quote_plus(q)), headers=UA, timeout=TIMEOUT)
     r.raise_for_status()
-    return parse_rss(r.text)
+    return parse_rss(r.text, "gn")
 
 
-def parse_rss(xml_text: str) -> list[dict]:
+def bing_news(query: str, keywords: list[str], session=None) -> list[dict]:
+    """Bing News RSS: no date operator — stale items are dropped later by max_age_days."""
+    q = f"{query} ({_kw_group(keywords)})"
+    r = (session or requests).get(BING_URL.format(q=quote_plus(q)), headers=UA, timeout=TIMEOUT)
+    r.raise_for_status()
+    if not r.text.lstrip().startswith("<?xml") and "<rss" not in r.text[:500]:
+        raise RuntimeError("Bing повернув не RSS (можливо, капча)")
+    return parse_rss(r.text, "bn")
+
+
+def _unwrap(link: str) -> str:
+    """Bing wraps links: …/apiclick.aspx?…&url=https%3a%2f%2fsite%2fpage&… → the real URL."""
+    m = re.search(r"[?&]url=([^&]+)", link or "")
+    return unquote(m.group(1)) if m and "bing.com" in link else link
+
+
+def parse_rss(xml_text: str, prefix: str = "gn") -> list[dict]:
     root = ET.fromstring(xml_text)
     out = []
     for it in root.iter("item"):
         title = (it.findtext("title") or "").strip()
-        link = (it.findtext("link") or "").strip()
+        link = _unwrap((it.findtext("link") or "").strip())
         ts = None
         try:
             ts = parsedate_to_datetime(it.findtext("pubDate") or "").astimezone(timezone.utc)
         except Exception:
             pass
-        src = it.find("source")
+        src = next((c for c in it if c.tag == "source" or c.tag.endswith("}Source")), None)   # Bing: News:Source
         out.append({
-            "id": "gn:" + ((it.findtext("guid") or "").strip() or _hid(title, link)),
+            "id": f"{prefix}:" + ((it.findtext("guid") or "").strip() or _hid(title, link)),
             "title": title,
             "text": title + " " + _strip_tags(it.findtext("description") or ""),
             "link": link,
             "ts": ts,
-            "via": (src.text or "").strip() if src is not None and src.text else "Google News",
+            "via": (src.text or "").strip() if src is not None and src.text else
+                   ("Google News" if prefix == "gn" else "Bing News"),
         })
     return out
 
@@ -299,7 +330,8 @@ class Watcher:
     # ---- one source -------------------------------------------------------
     def _guard(self, key: str, fn):
         """Run a fetcher; count consecutive failures, report once after N, report recovery."""
-        n_alert = int(self.T.get("fail_alert_checks", 6))
+        n_alert = int(self.T.get("telegram_fail_alert_checks", 12) if key.startswith("tg:")
+                      else self.T.get("fail_alert_checks", 6))
         try:
             res = fn()
         except Exception as e:
@@ -328,27 +360,43 @@ class Watcher:
         found.setdefault(project, []).append(item)
 
     # ---- full pass --------------------------------------------------------
+    def _due(self, stamp: str, hours: float, force: bool) -> bool:
+        last = parse_iso(self.st.get(stamp))
+        if force or not last or self.now - last >= timedelta(hours=hours):
+            self.st[stamp] = iso(self.now)
+            return True
+        return False
+
+    def _relevant(self, p: dict, text: str) -> bool:
+        return not hits(text, list(p.get("exclude", [])))
+
     def run(self, force: bool = False) -> list[str]:
         if not projects(self.cfg):
             return []
         self.reminders()
-        last = parse_iso(self.st.get("checked_at"))
-        if not force and last and self.now - last < timedelta(hours=float(self.T.get("check_hours", 2))):
+        news_due = self._due("checked_at", float(self.T.get("check_hours", 2)), force)
+        # Telegram-канали пишуть швидко (Foresight News ~11 постів/год, а t.me/s віддає лише 20 останніх) — частіше
+        tg_due = self._due("tg_checked_at", float(self.T.get("telegram_check_hours", 0.25)), force)
+        if not (news_due or tg_due):
             return self.messages
-        self.st["checked_at"] = iso(self.now)
         kws = [str(k) for k in self.T.get("keywords", [])]
+        news_kws = self.T.get("news_keywords", kws)
         found: dict[str, list[dict]] = {}
 
-        for key, p in projects(self.cfg).items():
+        for key, p in projects(self.cfg).items() if news_due else ():
             names = [p.get("name", key)] + list(p.get("aliases", []))
-            # Google News: the query pins the project; title must name it and carry a keyword
-            if p.get("news_query") and self.T.get("google_news", True):
-                sk = f"gnews:{key}"
-                items = self._guard(sk, lambda p=p: google_news(p["news_query"], self.T.get("news_keywords", kws),
-                                                                int(self.T.get("news_days", 14)), self.session))
+            # Google News + Bing News: the query pins the project; the title must name it and carry a keyword
+            engines = [("gnews", lambda p=p: google_news(p["news_query"], news_kws, int(self.T.get("news_days", 14)),
+                                                         self.session)),
+                       ("bing", lambda p=p: bing_news(p["news_query"], news_kws, self.session))]
+            for eng, fn in engines if p.get("news_query") else ():
+                if eng not in (self.T.get("news_engines") or ["gnews", "bing"]):
+                    continue
+                sk = f"{eng}:{key}"
+                items = self._guard(sk, fn)
                 if items is not None:
                     for it in items:
-                        if hits(it["title"], names) and hits(it["title"], kws):
+                        if hits(it["title"], names) and hits(it["title"], kws) and self._relevant(p, it["title"]):
                             self._accept(sk, it, key, found)
                     self.st["seeded"][sk] = True
             # docs: new pages whose path looks token-related
@@ -369,7 +417,7 @@ class Watcher:
                     self.st["seeded"][sk] = True
 
         # public Telegram channels: strict aliases (a bare «Saturn» is too ambiguous) + keyword
-        for ch in self.T.get("telegram_channels", []) or []:
+        for ch in (self.T.get("telegram_channels", []) or []) if tg_due else ():
             sk = f"tg:{ch}"
             posts = self._guard(sk, lambda ch=ch: telegram_channel(ch, self.session))
             if posts is None:
@@ -378,7 +426,7 @@ class Watcher:
                 if not hits(it["text"], kws):
                     continue
                 for key, p in projects(self.cfg).items():
-                    if hits(it["text"], list(p.get("aliases", []))):
+                    if hits(it["text"], list(p.get("aliases", []))) and self._relevant(p, it["text"]):
                         self._accept(sk, it, key, found)
             self.st["seeded"][sk] = True
 

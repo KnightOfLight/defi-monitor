@@ -110,20 +110,26 @@ sources:
 
 # --- TGE / airdrop -------------------------------------------------------------
 # Анонси з'являються в X, який безкоштовно не читається. Бот шукає те, що за кілька годин потрапляє у відкритий
-# веб: Google News (передруки, лістинги бірж), публічні Telegram-канали, нові сторінки в документації проєктів.
+# веб: Google News і Bing News (передруки, лістинги бірж; Bing бачить більше дрібних крипто-сайтів, напр. KuCoin
+# flash), публічні Telegram-канали новин і бірж, нові сторінки в документації проєктів.
 # Повідомлення — коли текст називає проєкт (name/aliases) І містить ключове слово. Перший прохід кожного джерела тихий.
 # Статуси нижче — станом на 20.10.2026; відредагуйте, коли щось зміниться.
 tge:
-  check_hours: 2            # як часто перевіряти новини
+  check_hours: 2            # як часто перевіряти Google/Bing News і docs
+  telegram_check_hours: 0.2 # Telegram-канали — щозапуску (Foresight News пише ~11 постів/год, t.me/s віддає 20)
   news_days: 14             # Google News: шукати за останні N днів
   max_age_days: 7           # старші статті не надсилати
   fail_alert_checks: 6      # джерело новин не відповідає 6 перевірок поспіль (~12 год) → одне повідомлення
+  telegram_fail_alert_checks: 12   # для Telegram-каналів (перевіряються частіше) — ~3 год
+  news_engines: [gnews, bing]
   remind_days: [7, 1]       # нагадування до дати, заданої через /tge (+ у день TGE)
   keywords: [TGE, "token generation", "token launch", airdrop, claim, claiming, snapshot, tokenomics, listing,
-             "will list", launchpool, launchpad, HODLer, "pre-market", premarket, booster, "Binance Alpha",
-             "allocation checker", season]
+             "will list", launchpool, launchpad, megadrop, HODLer, "pre-market", premarket, booster, "Binance Alpha",
+             "allocation checker", season,
+             空投, 代币经济学, 代币生成, 代币发行, 发币, 快照, 领取, 上市]   # китайські — для Foresight News / BlockBeats
   news_keywords: [TGE, airdrop, tokenomics, token, listing, claim, snapshot, season]   # для запиту в Google News
-  telegram_channels: [wublockchainenglish]   # публічні канали (t.me/s/<назва>); можна додати свої
+  # публічні канали (t.me/s/<назва> відкривається в браузері), перевірено 20.10.2026; можна додати свої
+  telegram_channels: [wublockchainenglish, binance_announcements, Bybit_Announcements, foresightnews, theblockbeats]
   projects:
     saturn:
       name: Saturn
@@ -133,7 +139,7 @@ tge:
       status: "STRN: TGE заплановано на Q4 2026 (анонс 25.09), точної дати немає. Snapshot сезону 2 (до 5% supply)
         — перед TGE, якщо TGE до 08.12.2026. За повідомленнями від 25.09 allocation checker працює, claim ще не відкритий."
       hint: "Snapshot сезону 2 Saturn робиться перед TGE — позиції в Saturn до snapshot не чіпати."
-      aliases: ["Saturn Credit", "Saturn Labs", "Saturn Foundation", STRN, USDat, sUSDat]
+      aliases: ["Saturn Credit", "Saturn Labs", "Saturn Foundation", STRN, STRNUSDT, USDat, sUSDat]
       news_query: 'Saturn (STRN OR USDat OR sUSDat OR "Saturn Credit")'
       docs_sitemap: https://docs.saturn.credit/sitemap.xml
     unitas:
@@ -143,7 +149,8 @@ tge:
       expected: "TGE відбувся 13.03.2026 ($UP)"
       status: "$UP уже вийшов: TGE 13.03.2026 через Binance Wallet. Стежу за новими сезонами й розподілами."
       aliases: [Unitas, "Unitas Labs", USDu, sUSDu]
-      news_query: 'Unitas (USDu OR "Unitas Labs" OR UP)'
+      news_query: 'Unitas (USDu OR sUSDu OR "Unitas Labs")'
+      exclude: [Johnny, Colts, NFL, football, quarterback]   # «Unitas» — ще й футболіст Johnny Unitas
       docs_sitemap: https://docs.unitas.so/sitemap.xml
     infinifi:
       name: infiniFi
@@ -152,7 +159,7 @@ tge:
       expected: "Q4 2026"
       status: "INFI: TGE у Q4 2026, точної дати немає. Токеноміка 14.10: 45% екосистема (з неї airdrop),
         20% команда, 20% інвестори, 15% фонд. Claim-сторінки ще немає."
-      aliases: [infiniFi, INFI, siUSD, liUSD]
+      aliases: [infiniFi, INFI, INFIUSDT, siUSD, liUSD]
       news_query: infiniFi
       docs_sitemap: https://docs.infinifi.xyz/sitemap.xml
     tori:

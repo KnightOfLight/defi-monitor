@@ -485,6 +485,14 @@ TME = """<html><body><section class="tgme_channel_history js-message_history">
 <a class="tgme_widget_message_date" href="#"><time datetime="2026-10-21T09:20:00+00:00" class="time">09:20</time></a>
 </div></div></section></body></html>"""
 
+BING = """<?xml version="1.0" encoding="utf-8" ?><rss version="2.0" xmlns:News="https://www.bing.com:443/news/search?q=x&amp;format=rss"><channel><title>x</title>
+<item><title>infiniFi Reveals INFI Tokenomics with 45% Allocated to Ecosystem</title>
+<link>http://www.bing.com/news/apiclick.aspx?ref=FexRss&amp;aid=&amp;tid=1&amp;url=https%3a%2f%2fwww.kucoin.com%2fnews%2fflash%2finfinifi-reveals&amp;c=1&amp;mkt=en-us</link>
+<description>infiniFi published INFI tokenomics.</description><pubDate>{d}</pubDate><News:Source>kucoin</News:Source></item>
+<item><title>Tokenomics 101: Building Sustainable Economic Models</title><link>http://www.bing.com/news/apiclick.aspx?url=https%3a%2f%2fforbes.com%2fa</link>
+<pubDate>Thu, 12 Dec 2024 04:30:00 GMT</pubDate><News:Source>Forbes</News:Source></item>
+</channel></rss>"""
+
 SITEMAP_INDEX = """<?xml version="1.0"?><sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 <sitemap><loc>https://docs.x.io/sitemap-pages.xml</loc></sitemap></sitemapindex>"""
 SITEMAP_PAGES = """<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -539,6 +547,16 @@ class TestTge(unittest.TestCase):
         self.assertEqual(tge.doc_path("https://docs.unitas.so/overview/up"), "/overview/up")
         self.assertEqual(tge.doc_hit("/overview/up/tokenomics", ["UP"]), ["tokenomics", "up"])
         self.assertEqual(tge.doc_hit("/points/get-susdu-lp", ["UP"]), [])
+        self.assertEqual(tge.doc_hit("/saturn-docs/operations-and-governance/new-page", ["STRN"]), [])
+        # китайський текст: латинська назва без пробілів і китайські ключові слова
+        self.assertEqual(tge.hits("加密协议infiniFi公布代币经济学", ["infiniFi"]), ["infiniFi"])
+        self.assertEqual(tge.hits("infiniFi宣布空投快照时间", ["空投", "TGE"]), ["空投"])
+        self.assertEqual(tge.hits("Bybit: New Crypto Perpetual Listing: INFIUSDT", ["INFI", "INFIUSDT"]), ["INFIUSDT"])
+        self.assertNotEqual(tge.hid_title("Saturn 宣布 TGE"), tge.hid_title("Tori 宣布空投"))
+        b = tge.parse_rss(BING.format(d="Tue, 13 Oct 2026 18:33:00 GMT"), "bn")
+        self.assertEqual(b[0]["link"], "https://www.kucoin.com/news/flash/infinifi-reveals")
+        self.assertEqual(b[0]["via"], "kucoin")
+        self.assertTrue(b[0]["id"].startswith("bn:"))
         sess = FakeSession({"https://docs.x.io/sitemap.xml": SITEMAP_INDEX,
                             "https://docs.x.io/sitemap-pages.xml": SITEMAP_PAGES.format(extra="")})
         self.assertEqual(tge.sitemap_urls("https://docs.x.io/sitemap.xml", sess),
@@ -575,14 +593,17 @@ class TestTge(unittest.TestCase):
         extra = {"v": ""}
         rss = {"v": RSS.format(d1=format_datetime(T0 - timedelta(days=30)), d_old=format_datetime(T0 - timedelta(days=200)))}
         tme = {"v": "<html>" + TME.split('<div class="tgme_widget_message_wrap')[0] + "</html>"}  # no posts yet
+        bing = {"v": BING.format(d=format_datetime(T0 - timedelta(days=30)))}
         sess = FakeSession({"https://news.google.com/": lambda: rss["v"], "https://t.me/s/": lambda: tme["v"] + "tgme_widget_message",
+                            "https://www.bing.com/": lambda: bing["v"],
                             "https://docs.x.io/sitemap.xml": SITEMAP_INDEX,
                             "https://docs.x.io/sitemap-pages.xml": lambda: SITEMAP_PAGES.format(extra=extra["v"])})
         st = fresh_state(T0 - timedelta(days=30))
         # 1) first pass is silent: everything that exists now is remembered
         msgs = tge.Watcher(self.cfg, st, T0, sess).run()
         self.assertEqual(msgs, [])
-        self.assertTrue(st["tge"]["seeded"]["gnews:infinifi"] and st["tge"]["seeded"]["docs:infinifi"])
+        self.assertTrue(st["tge"]["seeded"]["gnews:infinifi"] and st["tge"]["seeded"]["docs:infinifi"]
+                        and st["tge"]["seeded"]["bing:infinifi"])
         # 2) within check_hours nothing is fetched
         rss["v"] = RSS.format(d1=format_datetime(T0 + timedelta(hours=1)), d_old=format_datetime(T0 - timedelta(days=200)))
         self.assertEqual(tge.Watcher(self.cfg, st, T0 + timedelta(hours=1), sess).run(), [])
@@ -591,6 +612,7 @@ class TestTge(unittest.TestCase):
             .replace("CBMi-a1", "CBMi-b1").replace("CBMi-a2", "CBMi-b2").replace("CBMi-a4", "CBMi-b4") \
             .replace("sets INFI TGE for November 18", "confirms INFI TGE date: November 18")
         tme["v"] = TME
+        bing["v"] = BING.format(d=format_datetime(T0 + timedelta(hours=2))).replace("Reveals INFI", "Confirms INFI TGE and")
         extra["v"] = "<url><loc>https://docs.x.io/infi/tokenomics</loc></url><url><loc>https://docs.x.io/vaults</loc></url>"
         msgs = tge.Watcher(self.cfg, st, T0 + timedelta(hours=3), sess).run()
         self.assertEqual(len(msgs), 2)    # infiniFi (news + docs) and Saturn (Telegram)
@@ -599,6 +621,8 @@ class TestTge(unittest.TestCase):
         self.assertEqual(m.count("confirms INFI TGE date"), 1)
         self.assertIn("📅 у тексті: <b>November 18</b>", m)
         self.assertIn("/infi/tokenomics", m)
+        self.assertIn("https://www.kucoin.com/news/flash/infinifi-reveals", m)   # Bing, посилання розгорнуте
+        self.assertNotIn("Tokenomics 101", m)
         self.assertNotIn("/vaults", m)
         self.assertNotIn("Blend", m)
         self.assertNotIn("last year", m)
@@ -614,6 +638,35 @@ class TestTge(unittest.TestCase):
         txt = tge.status_text(self.cfg, st, T0 + timedelta(hours=6))
         self.assertIn("confirms INFI TGE date", txt)
         self.assertIn("STRN", txt)
+
+    def test_telegram_runs_more_often_and_exclude(self):
+        cfg = load_config()
+        cfg["tge"]["projects"] = {"unitas": dict(cfg["tge"]["projects"]["unitas"], docs_sitemap=None)}
+        cfg["tge"]["telegram_channels"] = ["ch"]
+        calls = {"news": 0, "tg": 0}
+        post = {"v": ""}
+
+        def news():
+            calls["news"] += 1
+            return '<?xml version="1.0"?><rss><channel></channel></rss>'
+
+        def tg():
+            calls["tg"] += 1
+            return post["v"] + "tgme_widget_message"
+        sess = FakeSession({"https://news.google.com/": news, "https://www.bing.com/": news, "https://t.me/s/": tg})
+        st = fresh_state(T0)
+        tge.Watcher(cfg, st, T0, sess).run()
+        tge.Watcher(cfg, st, T0 + timedelta(minutes=15), sess).run()
+        tge.Watcher(cfg, st, T0 + timedelta(minutes=30), sess).run()
+        self.assertEqual(calls, {"news": 2, "tg": 3})        # новини раз на 2 год, Telegram щозапуску
+        post["v"] = TME.replace("Saturn Foundation: <b>STRN</b> TGE and Season 2 snapshot on Nov 20, 2026.",
+                                "Johnny Unitas jersey airdrop to Colts fans")
+        self.assertEqual(tge.Watcher(cfg, st, T0 + timedelta(minutes=45), sess).run(), [])
+        post["v"] = TME.replace("Saturn Foundation: <b>STRN</b> TGE and Season 2 snapshot on Nov 20, 2026.",
+                                "Unitas Labs 宣布 $UP 第二季空投快照").replace("26490", "26600")
+        msgs = tge.Watcher(cfg, st, T0 + timedelta(hours=1), sess).run()
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("Unitas Labs 宣布", msgs[0])
 
     def test_source_failure_alert_once_and_recovery(self):
         self.cfg["tge"]["projects"] = {"tori": dict(load_config()["tge"]["projects"]["tori"], news_query=None)}

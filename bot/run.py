@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import re
+from datetime import datetime, timezone
 import sys
 import time
 import traceback
@@ -253,13 +254,18 @@ def cmd_selftest(args) -> int:
     kws = T.get("keywords", [])
     for key, p in (T.get("projects") or {}).items():
         if p.get("news_query"):
-            def _gn(p=p):
-                items = tge.google_news(p["news_query"], T.get("news_keywords", kws), int(T.get("news_days", 14)))
-                rel = [x for x in items if tge.hits(x["title"], [p.get("name", "")] + list(p.get("aliases", [])))
-                       and tge.hits(x["title"], kws)]
-                top = f"; найсвіжіша: «{rel[0]['title'][:90]}»" if rel else ""
-                return f"{len(items)} статей за {T.get('news_days', 14)} дн, про TGE/airdrop: {len(rel)}{top}"
-            check(f"TGE · Google News {p.get('name', key)}", _gn, soft=True)
+            for eng, label in (("gnews", "Google News"), ("bing", "Bing News")):
+                def _news(p=p, eng=eng):
+                    items = (tge.google_news(p["news_query"], T.get("news_keywords", kws), int(T.get("news_days", 14)))
+                             if eng == "gnews" else tge.bing_news(p["news_query"], T.get("news_keywords", kws)))
+                    names = [p.get("name", "")] + list(p.get("aliases", []))
+                    rel = [x for x in items if tge.hits(x["title"], names) and tge.hits(x["title"], kws)
+                           and not tge.hits(x["title"], list(p.get("exclude", [])))]
+                    rel.sort(key=lambda x: x["ts"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+                    top = (f"; найсвіжіша про TGE: «{rel[0]['title'][:90]}» ({rel[0]['ts']:%d.%m})" if rel and rel[0]["ts"]
+                           else f"; приклад: «{items[0]['title'][:70]}» (не про TGE)" if items else "")
+                    return f"{len(items)} статей, про TGE/airdrop: {len(rel)}{top}"
+                check(f"TGE · {label} {p.get('name', key)}", _news, soft=True)
         if p.get("docs_sitemap"):
             def _sm(p=p):
                 urls = tge.sitemap_urls(p["docs_sitemap"])

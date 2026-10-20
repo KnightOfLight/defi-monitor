@@ -135,7 +135,7 @@ github.com → **New repository**:
 і `README.md` (через **Add file → Upload files** — перетягніть папки `bot`, `tests`, `tools` і файли; GitHub замінить
 однойменні). Воркфлоу і секрети не змінювались. Потім **Self-test** → Run workflow: мають бути ✅ нові рядки
 «Curve frxUSD/trUSD», «Tori on-chain», «Pendle trUSD on-chain», «Pendle API», «DefiLlama tori» і рядки
-«TGE · …» (Google News, docs, Telegram по кожному проєкту; ⚠️ у них не критичне). При наступному запуску
+«TGE · …» (Google News, Bing News, docs, Telegram; ⚠️ у них не критичне). При наступному запуску
 монітора прийде «🔄 Бот оновлено до v1.1.0» зі статусом.
 
 Журнал не втрачається: стовпці `curve_usdat_share` / `curve_pool_liquidity` у старих рядках лишаються, нові рядки
@@ -240,11 +240,14 @@ GitHub іноді запускає розклад із затримкою 5–20
 Усі чотири анонсують в X (Twitter), а X без платного API не читається. Тому бот бере те, що звідти за кілька годин
 потрапляє у відкритий веб:
 
-- **Google News** — пошук по кожному проєкту з ключовими словами (TGE, airdrop, tokenomics, listing, claim, snapshot,
-  season…). Сюди потрапляють передруки анонсів (KuCoin flash, ChainCatcher, CoinGabbar, TokenPost) і новини бірж про лістинг.
-- **Telegram-канал Wu Blockchain** (`t.me/s/wublockchainenglish`) — швидко публікує токеноміку й дати TGE. Можна додати
-  свої публічні канали в `tge.telegram_channels`. Тут потрібна точна назва (`Saturn Foundation`, `STRN`, `USDat`…),
-  бо просто «Saturn» — це й ракета, і планета.
+- **Google News і Bing News** — пошук по кожному проєкту з ключовими словами (TGE, airdrop, tokenomics, listing, claim,
+  snapshot, season…), раз на 2 години. Сюди потрапляють передруки анонсів і новини бірж про лістинг. Bing бачить
+  більше дрібних крипто-сайтів (наприклад, KuCoin flash з токеномікою infiniFi 13.10, якої в Google News немає).
+- **Публічні Telegram-канали** — щозапуску (раз на 15 хв): новини Wu Blockchain (англ.), Foresight News і BlockBeats
+  (кит., найшвидше пишуть про TGE), а також Binance і Bybit Announcements (лістинги, Binance Alpha, HODLer, Booster —
+  через Binance Wallet пройшов TGE Unitas). Свої канали — у `tge.telegram_channels`. Тут потрібна точна назва
+  (`Saturn Foundation`, `STRN`, `USDat`…), бо просто «Saturn» — це й ракета, і планета; для китайських текстів є
+  ключові слова 空投, 代币经济学, 快照 тощо.
 - **Документація проєктів** (`sitemap.xml`) — нова сторінка зі словами token / tokenomics / tge / airdrop / claim /
   season / тікер у шляху часто з'являється до офіційного анонсу.
 
@@ -252,7 +255,7 @@ GitHub іноді запускає розклад із затримкою 5–20
 з різних сайтів — одне повідомлення. Дати з тексту («November 18», «Q4 2026») бот виносить окремо. Коли дату
 підтверджено — `/tge infinifi 2026-11-18`, і бот нагадає за 7 і 1 день, а в день TGE попередить про фішингові claim-сайти.
 
-Обмеження: затримка відносно X — від години до кількох годин; анонс лише в Discord бот не побачить. Для TGE цього
+Обмеження: затримка відносно X — від 15 хвилин (якщо підхопили Telegram-канали) до кількох годин; анонс лише в Discord бот не побачить. Для TGE цього
 зазвичай досить: дату оголошують за дні–тижні.
 
 ## Звідки беруться дані (перевірено 09–12.10.2026; Tori — 20.10.2026)
@@ -296,7 +299,7 @@ liUSD-13w з docs, PT з `readTokens()` ринку Pendle — адресі `pend
 | ❌ Pendle trUSD on-chain / «PT … НІ» | адреса ринку в `pendle_trusd_market` не та; візьміть її з app.pendle.finance (URL сторінки ринку) або з алерту про новий ринок |
 | ❌ Curve frxUSD/trUSD | пул спорожнів або змінився — бот бере ціну з DefiLlama coins; новий пул: `python tools/find_pools.py eth 0xd0580192E98eA6CEB9c7b6191Ed2E27560911697` |
 | ❌ Pendle API | не критично: це лише резерв і пошук нових ринків, основні дані — on-chain |
-| ⚠️ TGE · Google News / Telegram / docs (self-test не валять) | тимчасово — само відновиться; якщо постійно: для docs перевірте адресу `docs_sitemap`, для Telegram — що канал публічний (`t.me/s/<назва>` відкривається в браузері) |
+| ⚠️ TGE · Google News / Bing News / Telegram / docs (self-test не валять) | тимчасово — само відновиться; якщо постійно: для docs перевірте адресу `docs_sitemap`, для Telegram — що канал публічний (`t.me/s/<назва>` відкривається в браузері) |
 | Забагато TGE-повідомлень не про ваш проєкт | приберіть надто загальне слово з `aliases` або `keywords` (наприклад `season`) у `config.yaml` |
 | Бот не відповідає на команди | натисніть Start у чаті з ботом; перевірте `TELEGRAM_CHAT_ID`; зачекайте наступного запуску |
 | Telegram-помилка 409 Conflict у логах | два боти з одним токеном (старий репозиторій не видалений або працює `loop` на сервері) — залиште один |
