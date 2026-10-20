@@ -296,10 +296,21 @@ def cmd_selftest(args) -> int:
 
     lines.append("РЕЗУЛЬТАТ: " + ("усе працює ✅" if ok_all else "є помилки ❌ — див. вище"))
     report = "\n".join(lines)
-    if os.environ.get("GITHUB_ACTIONS") == "true":      # анотації запуску: видно в Actions без завантаження логу
-        for ln in lines:
-            if "TGE ·" in ln or ln.startswith(("❌", "⚠️")):
-                print("::notice title=self-test::" + ln.replace("%", "%25").replace("\n", " ")[:900])
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        # анотації запуску видно в Actions без завантаження логу; GitHub показує лише 10 на крок,
+        # тому: кожен ❌/⚠️ окремо, а TGE-рядки — пачками по ~900 символів
+        bad = [ln for ln in lines if ln.startswith(("❌", "⚠️"))][:6]
+        chunks, cur = [], ""
+        for ln in (x for x in lines if "TGE ·" in x and x.startswith("✅")):
+            ln = ln.replace("✅ TGE · ", "")[:200]
+            if len(cur) + len(ln) > 900:
+                chunks.append(cur)
+                cur = ""
+            cur = f"{cur} | {ln}" if cur else ln
+        if cur:
+            chunks.append(cur)
+        for ln in bad + chunks[:3]:
+            print("::notice title=self-test::" + ln.replace("%", "%25").replace("\n", " ")[:1000])
     # console copy hides the bot username: Actions logs of a public repo are visible to everyone
     print(re.sub(r"бот @\S+", "бот @…", report))
     if tg_ok:
