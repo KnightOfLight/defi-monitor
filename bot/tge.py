@@ -106,10 +106,10 @@ def google_news(query: str, keywords: list[str], days: int = 14, session=None) -
     return parse_rss(r.text, "gn")
 
 
-def bing_news(query: str, keywords: list[str], session=None) -> list[dict]:
-    """Bing News RSS: no date operator — stale items are dropped later by max_age_days."""
-    q = f"{query} ({_kw_group(keywords)})"
-    r = (session or requests).get(BING_URL.format(q=quote_plus(q)), headers=UA, timeout=TIMEOUT)
+def bing_news(query: str, session=None) -> list[dict]:
+    """Bing News RSS. Only a plain query works: with «( … OR … )» Bing returns an empty feed, so keywords
+    are applied locally. No date operator — stale items are dropped later by max_age_days."""
+    r = (session or requests).get(BING_URL.format(q=quote_plus(query)), headers=UA, timeout=TIMEOUT)
     r.raise_for_status()
     if not r.text.lstrip().startswith("<?xml") and "<rss" not in r.text[:500]:
         raise RuntimeError("Bing повернув не RSS (можливо, капча)")
@@ -386,11 +386,14 @@ class Watcher:
         for key, p in projects(self.cfg).items() if news_due else ():
             names = [p.get("name", key)] + list(p.get("aliases", []))
             # Google News + Bing News: the query pins the project; the title must name it and carry a keyword
-            engines = [("gnews", lambda p=p: google_news(p["news_query"], news_kws, int(self.T.get("news_days", 14)),
-                                                         self.session)),
-                       ("bing", lambda p=p: bing_news(p["news_query"], news_kws, self.session))]
-            for eng, fn in engines if p.get("news_query") else ():
-                if eng not in (self.T.get("news_engines") or ["gnews", "bing"]):
+            engines = []
+            if p.get("news_query"):
+                engines.append(("gnews", lambda p=p: google_news(p["news_query"], news_kws,
+                                                                 int(self.T.get("news_days", 14)), self.session)))
+            for i, bq in enumerate(p.get("bing_queries") or []):
+                engines.append((f"bing{i or ''}", lambda bq=bq: bing_news(bq, self.session)))
+            for eng, fn in engines:
+                if eng.rstrip("0123456789") not in (self.T.get("news_engines") or ["gnews", "bing"]):
                     continue
                 sk = f"{eng}:{key}"
                 items = self._guard(sk, fn)
@@ -407,7 +410,10 @@ class Watcher:
                     paths = {doc_path(u): u for u in sorted(urls)}
                     known = set(self.st["doc_paths"].get(key, []))
                     if self.st["seeded"].get(sk):
+                        ignore = tuple(p.get("docs_ignore") or ())
                         for path in sorted(set(paths) - known):
+                            if ignore and path.startswith(ignore):
+                                continue
                             words = doc_hit(path, [p.get("ticker", "")])
                             if words:
                                 found.setdefault(key, []).append({

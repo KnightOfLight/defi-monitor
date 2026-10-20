@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 from datetime import datetime, timezone
 import sys
@@ -254,10 +255,12 @@ def cmd_selftest(args) -> int:
     kws = T.get("keywords", [])
     for key, p in (T.get("projects") or {}).items():
         if p.get("news_query"):
-            for eng, label in (("gnews", "Google News"), ("bing", "Bing News")):
-                def _news(p=p, eng=eng):
-                    items = (tge.google_news(p["news_query"], T.get("news_keywords", kws), int(T.get("news_days", 14)))
-                             if eng == "gnews" else tge.bing_news(p["news_query"], T.get("news_keywords", kws)))
+            variants = [("gnews", "Google News", p["news_query"])] + \
+                [("bing", f"Bing «{bq}»", bq) for bq in p.get("bing_queries") or []]
+            for eng, label, q in variants:
+                def _news(p=p, eng=eng, q=q):
+                    items = (tge.google_news(q, T.get("news_keywords", kws), int(T.get("news_days", 14)))
+                             if eng == "gnews" else tge.bing_news(q))
                     names = [p.get("name", "")] + list(p.get("aliases", []))
                     rel = [x for x in items if tge.hits(x["title"], names) and tge.hits(x["title"], kws)
                            and not tge.hits(x["title"], list(p.get("exclude", [])))]
@@ -293,6 +296,10 @@ def cmd_selftest(args) -> int:
 
     lines.append("РЕЗУЛЬТАТ: " + ("усе працює ✅" if ok_all else "є помилки ❌ — див. вище"))
     report = "\n".join(lines)
+    if os.environ.get("GITHUB_ACTIONS") == "true":      # анотації запуску: видно в Actions без завантаження логу
+        for ln in lines:
+            if "TGE ·" in ln or ln.startswith(("❌", "⚠️")):
+                print("::notice title=self-test::" + ln.replace("%", "%25").replace("\n", " ")[:900])
     # console copy hides the bot username: Actions logs of a public repo are visible to everyone
     print(re.sub(r"бот @\S+", "бот @…", report))
     if tg_ok:

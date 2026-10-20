@@ -140,7 +140,8 @@ tge:
         — перед TGE, якщо TGE до 08.12.2026. За повідомленнями від 25.09 allocation checker працює, claim ще не відкритий."
       hint: "Snapshot сезону 2 Saturn робиться перед TGE — позиції в Saturn до snapshot не чіпати."
       aliases: ["Saturn Credit", "Saturn Labs", "Saturn Foundation", STRN, STRNUSDT, USDat, sUSDat]
-      news_query: 'Saturn (STRN OR USDat OR sUSDat OR "Saturn Credit")'
+      news_query: '"Saturn" ("STRN" OR "USDat" OR "sUSDat" OR "Saturn Credit")'   # лапки = точний збіг у Google
+      bing_queries: ["Saturn STRN", "Saturn USDat"]   # Bing: лише прості запити, ключові слова фільтрує бот
       docs_sitemap: https://docs.saturn.credit/sitemap.xml
     unitas:
       name: Unitas
@@ -149,7 +150,8 @@ tge:
       expected: "TGE відбувся 13.03.2026 ($UP)"
       status: "$UP уже вийшов: TGE 13.03.2026 через Binance Wallet. Стежу за новими сезонами й розподілами."
       aliases: [Unitas, "Unitas Labs", USDu, sUSDu]
-      news_query: 'Unitas (USDu OR sUSDu OR "Unitas Labs")'
+      news_query: '"Unitas" ("USDu" OR "sUSDu" OR "Unitas Labs")'
+      bing_queries: ["Unitas USDu", "Unitas Labs"]
       exclude: [Johnny, Colts, NFL, football, quarterback]   # «Unitas» — ще й футболіст Johnny Unitas
       docs_sitemap: https://docs.unitas.so/sitemap.xml
     infinifi:
@@ -160,7 +162,9 @@ tge:
       status: "INFI: TGE у Q4 2026, точної дати немає. Токеноміка 14.10: 45% екосистема (з неї airdrop),
         20% команда, 20% інвестори, 15% фонд. Claim-сторінки ще немає."
       aliases: [infiniFi, INFI, INFIUSDT, siUSD, liUSD]
-      news_query: infiniFi
+      news_query: '"infiniFi"'
+      bing_queries: [infiniFi]
+      docs_ignore: [/dev-docs/]   # технічні сторінки про iUSD/siUSD/liUSD — не анонс токена
       docs_sitemap: https://docs.infinifi.xyz/sitemap.xml
     tori:
       name: Tori
@@ -169,7 +173,8 @@ tge:
       expected: "не оголошено"
       status: "Токен не анонсовано. Поінти Cores, сезон 1 з 23.06.2026, кінець сезону не оголошено."
       aliases: ["Tori Finance", trUSD, strUSD, "Tori Cores"]
-      news_query: '("Tori Finance" OR trUSD)'
+      news_query: '("Tori Finance" OR "trUSD")'
+      bing_queries: ['"Tori Finance"', trUSD]
       docs_sitemap: https://docs.tori.finance/sitemap.xml
 
 # --- Файли стану ---------------------------------------------------------------

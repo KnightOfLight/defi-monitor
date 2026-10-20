@@ -525,7 +525,7 @@ class TestTge(unittest.TestCase):
         self.cfg = load_config()
         self.cfg["tge"]["projects"] = {
             "infinifi": dict(self.cfg["tge"]["projects"]["infinifi"], docs_sitemap="https://docs.x.io/sitemap.xml"),
-            "saturn": dict(self.cfg["tge"]["projects"]["saturn"], docs_sitemap=None, news_query=None),
+            "saturn": dict(self.cfg["tge"]["projects"]["saturn"], docs_sitemap=None, news_query=None, bing_queries=None),
         }
         self.cfg["tge"]["telegram_channels"] = ["wublockchainenglish"]
 
@@ -553,6 +553,14 @@ class TestTge(unittest.TestCase):
         self.assertEqual(tge.hits("infiniFi宣布空投快照时间", ["空投", "TGE"]), ["空投"])
         self.assertEqual(tge.hits("Bybit: New Crypto Perpetual Listing: INFIUSDT", ["INFI", "INFIUSDT"]), ["INFIUSDT"])
         self.assertNotEqual(tge.hid_title("Saturn 宣布 TGE"), tge.hid_title("Tori 宣布空投"))
+        seen_urls = []
+
+        class Rec:
+            def get(self, url, **kw):
+                seen_urls.append(url)
+                return FakeResp(BING.format(d="Tue, 13 Oct 2026 18:33:00 GMT"))
+        tge.bing_news("Saturn STRN", Rec())
+        self.assertIn("q=Saturn+STRN&format=rss", seen_urls[0])      # без «( … OR … )» — з ними Bing порожній
         b = tge.parse_rss(BING.format(d="Tue, 13 Oct 2026 18:33:00 GMT"), "bn")
         self.assertEqual(b[0]["link"], "https://www.kucoin.com/news/flash/infinifi-reveals")
         self.assertEqual(b[0]["via"], "kucoin")
@@ -613,7 +621,8 @@ class TestTge(unittest.TestCase):
             .replace("sets INFI TGE for November 18", "confirms INFI TGE date: November 18")
         tme["v"] = TME
         bing["v"] = BING.format(d=format_datetime(T0 + timedelta(hours=2))).replace("Reveals INFI", "Confirms INFI TGE and")
-        extra["v"] = "<url><loc>https://docs.x.io/infi/tokenomics</loc></url><url><loc>https://docs.x.io/vaults</loc></url>"
+        extra["v"] = ("<url><loc>https://docs.x.io/infi/tokenomics</loc></url><url><loc>https://docs.x.io/vaults</loc></url>"
+                      "<url><loc>https://docs.x.io/dev-docs/tokens/new-receipt-token</loc></url>")
         msgs = tge.Watcher(self.cfg, st, T0 + timedelta(hours=3), sess).run()
         self.assertEqual(len(msgs), 2)    # infiniFi (news + docs) and Saturn (Telegram)
         m = next(x for x in msgs if "infiniFi" in x)
@@ -624,6 +633,7 @@ class TestTge(unittest.TestCase):
         self.assertIn("https://www.kucoin.com/news/flash/infinifi-reveals", m)   # Bing, посилання розгорнуте
         self.assertNotIn("Tokenomics 101", m)
         self.assertNotIn("/vaults", m)
+        self.assertNotIn("new-receipt-token", m)                      # docs_ignore: /dev-docs/
         self.assertNotIn("Blend", m)
         self.assertNotIn("last year", m)
         # Telegram: strict aliases — «Saturn V rocket» is not the Saturn protocol
@@ -658,7 +668,7 @@ class TestTge(unittest.TestCase):
         tge.Watcher(cfg, st, T0, sess).run()
         tge.Watcher(cfg, st, T0 + timedelta(minutes=15), sess).run()
         tge.Watcher(cfg, st, T0 + timedelta(minutes=30), sess).run()
-        self.assertEqual(calls, {"news": 2, "tg": 3})        # новини раз на 2 год, Telegram щозапуску
+        self.assertEqual(calls, {"news": 3, "tg": 3})        # новини раз на 2 год (Google + 2 Bing), Telegram щозапуску
         post["v"] = TME.replace("Saturn Foundation: <b>STRN</b> TGE and Season 2 snapshot on Nov 20, 2026.",
                                 "Johnny Unitas jersey airdrop to Colts fans")
         self.assertEqual(tge.Watcher(cfg, st, T0 + timedelta(minutes=45), sess).run(), [])
@@ -669,7 +679,8 @@ class TestTge(unittest.TestCase):
         self.assertIn("Unitas Labs 宣布", msgs[0])
 
     def test_source_failure_alert_once_and_recovery(self):
-        self.cfg["tge"]["projects"] = {"tori": dict(load_config()["tge"]["projects"]["tori"], news_query=None)}
+        self.cfg["tge"]["projects"] = {"tori": dict(load_config()["tge"]["projects"]["tori"], news_query=None,
+                                                    bing_queries=None)}
         self.cfg["tge"]["telegram_channels"] = []
         st = fresh_state(T0)
         bad = FakeSession({"https://docs.tori.finance/": RuntimeError("HTTP 503")})
@@ -684,7 +695,7 @@ class TestTge(unittest.TestCase):
         self.assertIn("знову працює", out[0])
 
     def test_tge_command_and_reminders(self):
-        self.cfg["tge"]["projects"] = {k: dict(v, news_query=None, docs_sitemap=None)
+        self.cfg["tge"]["projects"] = {k: dict(v, news_query=None, docs_sitemap=None, bing_queries=None)
                                        for k, v in load_config()["tge"]["projects"].items()}
         self.cfg["tge"]["telegram_channels"] = []
         st = fresh_state(T0)
