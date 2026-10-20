@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from . import fmt
+from . import fmt, tge
 from .commands import LOG_EXAMPLE, POINT_LABELS, Ctx
 from .storage import (POINTS_COLUMNS, journal_row_from_metrics, last_row_with_points, load_journal, save_journal,
                       to_float, value_ago)
@@ -105,6 +105,10 @@ def send_digest(ctx: Ctx, today: str) -> None:
     lines.append(f"strUSD: <b>{fmt.rate(m.get('strusd_rate'))}</b> {fmt.arrow(d)} {fmt.pct(d, 3, signed=True)} · "
                  f"буфер першого збитку {fmt.pct(m.get('strusd_buffer_pct'))}")
     lines.append("")
+
+    tl = tge.digest_lines(ctx.cfg, ctx.state, ctx.now)
+    if tl:
+        lines += tl + [""]
 
     # points: last two logged rows
     last = last_row_with_points(rows, before_index=len(rows) - 1)

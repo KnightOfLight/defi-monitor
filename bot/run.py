@@ -14,7 +14,7 @@ import sys
 import time
 import traceback
 
-from . import __version__, fmt, sources
+from . import __version__, fmt, sources, tge
 from .alerts import AlertEngine, warmup_note
 from .commands import Ctx, handle_updates, status_text
 from .config import load_config, require_telegram
@@ -26,8 +26,8 @@ from .weekly import run_weekly
 
 
 UPGRADE_NOTE = ("додано Tori — ринок Pendle trUSD (PT, implied APY, ліквідність, погашення 26.11), ціна trUSD, "
-                "курс strUSD, TVL Tori, поінти <code>/log tori …</code>; прибрано моніторинг пулу Curve USDC/USDat "
-                "(ціна USDat лишилась).")
+                "курс strUSD, TVL Tori, поінти <code>/log tori …</code>; стеження за анонсами TGE / airdrop "
+                "(<code>/tge</code>); прибрано моніторинг пулу Curve USDC/USDat (ціна USDat лишилась).")
 
 
 def make_ctx(cfg: dict, dry_run: bool = False) -> Ctx:
@@ -88,6 +88,11 @@ def monitor_pass(ctx: Ctx, process_commands: bool = True) -> None:
     state["announced_version"] = __version__
     for msg in messages:
         ctx.tg.send(msg)
+    try:                                   # TGE-новини: власний розклад (check_hours), ніколи не ламає моніторинг
+        for msg in tge.run_tge(cfg, state, ctx.now):
+            ctx.tg.send(msg)
+    except Exception as e:
+        print(f"[warn] TGE watcher: {e}", file=sys.stderr)
 
     ctx.history = append_history(cfg["files"]["history"], ctx.metrics, ctx.now,
                                  int(cfg["files"].get("history_keep_days", 10)))
@@ -139,14 +144,16 @@ def cmd_selftest(args) -> int:
     lines: list[str] = [f"🧪 Self-test defi-monitor v{__version__}"]
     ok_all = True
 
-    def check(label, fn):
+    def check(label, fn, soft: bool = False):
+        """soft=True: an optional source (TGE news) — shown as ⚠️, does not fail the self-test."""
         nonlocal ok_all
         try:
             res = fn()
             lines.append(f"✅ {label}: {res}")
         except Exception as e:
-            ok_all = False
-            lines.append(f"❌ {label}: {e}")
+            if not soft:
+                ok_all = False
+            lines.append(f"{'⚠️' if soft else '❌'} {label}: {str(e)[:300]}")
 
     dl = src["defillama"]
     for key, slug in dl["slugs"].items():
@@ -241,6 +248,34 @@ def cmd_selftest(args) -> int:
         return (f"API: PT {mk['pt_price']:.6f}, APY {mk['implied_apy_pct']:.2f}%, ліквідність ${mk['liquidity_usd']:,.0f}; "
                 f"активних ринків trUSD: {len(allm)} ({', '.join(x['expiry'] for x in allm)}) (резервне джерело)")
     check("Pendle API", _pendle_api)
+
+    T = cfg.get("tge") or {}
+    kws = T.get("keywords", [])
+    for key, p in (T.get("projects") or {}).items():
+        if p.get("news_query"):
+            def _gn(p=p):
+                items = tge.google_news(p["news_query"], T.get("news_keywords", kws), int(T.get("news_days", 14)))
+                rel = [x for x in items if tge.hits(x["title"], [p.get("name", "")] + list(p.get("aliases", [])))
+                       and tge.hits(x["title"], kws)]
+                top = f"; найсвіжіша: «{rel[0]['title'][:90]}»" if rel else ""
+                return f"{len(items)} статей за {T.get('news_days', 14)} дн, про TGE/airdrop: {len(rel)}{top}"
+            check(f"TGE · Google News {p.get('name', key)}", _gn, soft=True)
+        if p.get("docs_sitemap"):
+            def _sm(p=p):
+                urls = tge.sitemap_urls(p["docs_sitemap"])
+                if not urls:
+                    raise RuntimeError("sitemap порожній")
+                tok = sorted({tge.doc_path(u) for u in urls if tge.doc_hit(tge.doc_path(u), [p.get("ticker", "")])})
+                return f"{len(urls)} сторінок; про токен/поінти: {', '.join(tok[:4]) or 'немає'}"
+            check(f"TGE · docs {p.get('name', key)}", _sm, soft=True)
+    for ch in T.get("telegram_channels", []) or []:
+        def _tg(ch=ch):
+            posts = tge.telegram_channel(ch)
+            if not posts:
+                raise RuntimeError("постів не знайдено")
+            return f"{len(posts)} останніх постів, найновіший {posts[-1]['ts']:%d.%m %H:%M} UTC" if posts[-1].get("ts") \
+                else f"{len(posts)} останніх постів"
+        check(f"TGE · Telegram @{ch}", _tg, soft=True)
 
     tg_ok = bool(cfg["telegram"]["token"] and cfg["telegram"]["chat_id"])
     if tg_ok:

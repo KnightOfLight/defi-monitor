@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from . import fmt
+from . import fmt, tge
 from .alerts import status_levels
 from .metrics import collect
 from .storage import (POINTS_COLUMNS, journal_row_from_metrics, last_row_with_points, load_history,
@@ -32,6 +32,8 @@ HELP = """<b>Команди бота</b>
 /note текст — дописати примітку до останнього рядка журналу
 /export — надіслати журнал CSV + підсумок за тиждень і місяць
 /thresholds — показати пороги алертів
+/tge — що відомо про TGE / airdrop кожного проєкту + останні знайдені новини
+/tge saturn 2026-11-20 — задати підтверджену дату TGE (нагадаю за 7 і 1 день); /tge saturn off — прибрати
 /help — ця довідка
 
 Бот запускається за розкладом, тому відповідь на команду приходить при наступному запуску (до 30 хв на GitHub Actions)."""
@@ -108,6 +110,8 @@ def dispatch(ctx: Ctx, text: str) -> str | None:
         return cmd_export(ctx)
     if cmd == "/thresholds":
         return thresholds_text(ctx.cfg)
+    if cmd in ("/tge", "/airdrop"):
+        return tge.cmd_tge(ctx.cfg, ctx.state, ctx.now, arg)
     if cmd.startswith("/"):
         return f"Невідома команда {esc(cmd)}.\n\n{HELP}"
     if parse_points(text):            # "saturn 123 unitas 45" без /log — теж приймаємо

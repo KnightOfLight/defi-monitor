@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from bot import alerts, commands, evm, sources, storage, weekly  # noqa: E402
+from bot import alerts, commands, evm, sources, storage, tge, weekly  # noqa: E402
 from bot.config import load_config  # noqa: E402
 from bot.telegram import Telegram  # noqa: E402
 
@@ -460,6 +460,183 @@ class TestCommandsAndWeekly(unittest.TestCase):
         self.assertEqual(storage.value_ago(rows, "tvl_saturn", T0, 24 * 8, 12), 152e6)
         rows = storage.append_history(p, base_metrics(), T0 + timedelta(days=3), keep_days=10)
         self.assertEqual(len(rows), 2)  # 11-day-old row pruned
+
+
+# --------------------------------------------------------------------------
+RSS = """<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>q</title>
+<item><title>infiniFi sets INFI TGE for November 18 - CoinGabbar</title><link>https://news.google.com/a1</link>
+<guid isPermaLink="false">CBMi-a1</guid><pubDate>{d1}</pubDate><description>&lt;a&gt;infiniFi sets INFI TGE&lt;/a&gt;</description>
+<source url="https://www.coingabbar.com">CoinGabbar</source></item>
+<item><title>infiniFi sets INFI TGE for November 18 - TokenPost</title><link>https://news.google.com/a2</link>
+<guid isPermaLink="false">CBMi-a2</guid><pubDate>{d1}</pubDate><source url="https://tokenpost.com">TokenPost</source></item>
+<item><title>infiniFi Prime goes live on Blend - Blockworks</title><link>https://news.google.com/a3</link>
+<guid isPermaLink="false">CBMi-a3</guid><pubDate>{d1}</pubDate><source url="https://blockworks.co">Blockworks</source></item>
+<item><title>infiniFi airdrop guide from last year - Old</title><link>https://news.google.com/a4</link>
+<guid isPermaLink="false">CBMi-a4</guid><pubDate>{d_old}</pubDate><source url="https://x.io">Old</source></item>
+</channel></rss>"""
+
+TME = """<html><body><section class="tgme_channel_history js-message_history">
+<div class="tgme_widget_message_wrap js-widget_message_wrap"><div class="tgme_widget_message text_not_supported_wrap js-widget_message" data-post="wublockchainenglish/26490" data-view="x">
+<div class="tgme_widget_message_text js-message_text" dir="auto">Saturn Foundation: <b>STRN</b> TGE and Season 2 snapshot on Nov 20, 2026.<br/>Claim details soon.</div>
+<div class="tgme_widget_message_footer"><a class="tgme_widget_message_date" href="https://t.me/wublockchainenglish/26490"><time datetime="2026-10-21T09:15:00+00:00" class="time">09:15</time></a></div>
+</div></div>
+<div class="tgme_widget_message_wrap js-widget_message_wrap"><div class="tgme_widget_message js-widget_message" data-post="wublockchainenglish/26491" data-view="y">
+<div class="tgme_widget_message_text js-message_text" dir="auto">Saturn V rocket replica sold at auction; airdrop of NFTs to bidders.</div>
+<a class="tgme_widget_message_date" href="#"><time datetime="2026-10-21T09:20:00+00:00" class="time">09:20</time></a>
+</div></div></section></body></html>"""
+
+SITEMAP_INDEX = """<?xml version="1.0"?><sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<sitemap><loc>https://docs.x.io/sitemap-pages.xml</loc></sitemap></sitemapindex>"""
+SITEMAP_PAGES = """<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<url><loc>https://docs.x.io/overview</loc></url><url><loc>https://docs.x.io/es/overview</loc></url>{extra}</urlset>"""
+
+
+class FakeResp:
+    def __init__(self, text):
+        self.text, self.content, self.status_code = text, text.encode(), 200
+
+    def raise_for_status(self):
+        pass
+
+
+class FakeSession:
+    def __init__(self, pages):
+        self.pages = pages
+
+    def get(self, url, **kw):
+        for k, v in self.pages.items():
+            if url.startswith(k):
+                if isinstance(v, Exception):
+                    raise v
+                return FakeResp(v() if callable(v) else v)
+        raise RuntimeError(f"unexpected url {url}")
+
+
+class TestTge(unittest.TestCase):
+    def setUp(self):
+        self.cfg = load_config()
+        self.cfg["tge"]["projects"] = {
+            "infinifi": dict(self.cfg["tge"]["projects"]["infinifi"], docs_sitemap="https://docs.x.io/sitemap.xml"),
+            "saturn": dict(self.cfg["tge"]["projects"]["saturn"], docs_sitemap=None, news_query=None),
+        }
+        self.cfg["tge"]["telegram_channels"] = ["wublockchainenglish"]
+
+    def test_parsers_and_helpers(self):
+        from email.utils import format_datetime
+        items = tge.parse_rss(RSS.format(d1=format_datetime(T0), d_old=format_datetime(T0 - timedelta(days=200))))
+        self.assertEqual(len(items), 4)
+        self.assertEqual(items[0]["via"], "CoinGabbar")
+        self.assertEqual(items[0]["ts"], T0)
+        posts = tge.parse_tme(TME)
+        self.assertEqual([p["id"] for p in posts], ["tg:wublockchainenglish/26490", "tg:wublockchainenglish/26491"])
+        self.assertIn("STRN TGE", posts[0]["text"])
+        self.assertEqual(posts[0]["link"], "https://t.me/wublockchainenglish/26490")
+        self.assertEqual(tge.dates_in("TGE on November 18, Q4 2026; claim 2026-11-20"), ["November 18", "Q4 2026", "2026-11-20"])
+        self.assertEqual(tge.dates_in("tokens may launch soon"), [])
+        self.assertEqual(tge.hits("New $INFI listing", ["INFI"]), ["INFI"])
+        self.assertEqual(tge.hits("INFINITY airdrop", ["INFI"]), [])
+        self.assertEqual(tge.doc_path("https://docs.tori.finance/es/resources/cores"), "/resources/cores")
+        self.assertEqual(tge.doc_path("https://docs.unitas.so/overview/up"), "/overview/up")
+        self.assertEqual(tge.doc_hit("/overview/up/tokenomics", ["UP"]), ["tokenomics", "up"])
+        self.assertEqual(tge.doc_hit("/points/get-susdu-lp", ["UP"]), [])
+        sess = FakeSession({"https://docs.x.io/sitemap.xml": SITEMAP_INDEX,
+                            "https://docs.x.io/sitemap-pages.xml": SITEMAP_PAGES.format(extra="")})
+        self.assertEqual(tge.sitemap_urls("https://docs.x.io/sitemap.xml", sess),
+                         {"https://docs.x.io/overview", "https://docs.x.io/es/overview"})
+
+    def test_watcher_seed_then_report(self):
+        from email.utils import format_datetime
+        extra = {"v": ""}
+        rss = {"v": RSS.format(d1=format_datetime(T0 - timedelta(days=30)), d_old=format_datetime(T0 - timedelta(days=200)))}
+        tme = {"v": "<html>" + TME.split('<div class="tgme_widget_message_wrap')[0] + "</html>"}  # no posts yet
+        sess = FakeSession({"https://news.google.com/": lambda: rss["v"], "https://t.me/s/": lambda: tme["v"] + "tgme_widget_message",
+                            "https://docs.x.io/sitemap.xml": SITEMAP_INDEX,
+                            "https://docs.x.io/sitemap-pages.xml": lambda: SITEMAP_PAGES.format(extra=extra["v"])})
+        st = fresh_state(T0 - timedelta(days=30))
+        # 1) first pass is silent: everything that exists now is remembered
+        msgs = tge.Watcher(self.cfg, st, T0, sess).run()
+        self.assertEqual(msgs, [])
+        self.assertTrue(st["tge"]["seeded"]["gnews:infinifi"] and st["tge"]["seeded"]["docs:infinifi"])
+        # 2) within check_hours nothing is fetched
+        rss["v"] = RSS.format(d1=format_datetime(T0 + timedelta(hours=1)), d_old=format_datetime(T0 - timedelta(days=200)))
+        self.assertEqual(tge.Watcher(self.cfg, st, T0 + timedelta(hours=1), sess).run(), [])
+        # 3) new items: same-story duplicates collapse, non-TGE and stale items are dropped
+        rss["v"] = RSS.format(d1=format_datetime(T0 + timedelta(hours=2)), d_old=format_datetime(T0 - timedelta(days=200))) \
+            .replace("CBMi-a1", "CBMi-b1").replace("CBMi-a2", "CBMi-b2").replace("CBMi-a4", "CBMi-b4") \
+            .replace("sets INFI TGE for November 18", "confirms INFI TGE date: November 18")
+        tme["v"] = TME
+        extra["v"] = "<url><loc>https://docs.x.io/infi/tokenomics</loc></url><url><loc>https://docs.x.io/vaults</loc></url>"
+        msgs = tge.Watcher(self.cfg, st, T0 + timedelta(hours=3), sess).run()
+        self.assertEqual(len(msgs), 2)    # infiniFi (news + docs) and Saturn (Telegram)
+        m = next(x for x in msgs if "infiniFi" in x)
+        self.assertIn("TGE / airdrop · infiniFi", m)
+        self.assertEqual(m.count("confirms INFI TGE date"), 1)
+        self.assertIn("📅 у тексті: <b>November 18</b>", m)
+        self.assertIn("/infi/tokenomics", m)
+        self.assertNotIn("/vaults", m)
+        self.assertNotIn("Blend", m)
+        self.assertNotIn("last year", m)
+        # Telegram: strict aliases — «Saturn V rocket» is not the Saturn protocol
+        sat = next(x for x in msgs if "· Saturn" in x)
+        self.assertIn("Nov 20, 2026", sat)
+        self.assertNotIn("rocket", sat)
+        self.assertIn("Snapshot сезону 2", sat)
+        # 4) the same story re-posted under new ids is not sent again
+        tme["v"] = TME.replace("26490", "26500").replace("26491", "26501")
+        self.assertEqual(tge.Watcher(self.cfg, st, T0 + timedelta(hours=6), sess).run(), [])
+        # /tge shows the findings
+        txt = tge.status_text(self.cfg, st, T0 + timedelta(hours=6))
+        self.assertIn("confirms INFI TGE date", txt)
+        self.assertIn("STRN", txt)
+
+    def test_source_failure_alert_once_and_recovery(self):
+        self.cfg["tge"]["projects"] = {"tori": dict(load_config()["tge"]["projects"]["tori"], news_query=None)}
+        self.cfg["tge"]["telegram_channels"] = []
+        st = fresh_state(T0)
+        bad = FakeSession({"https://docs.tori.finance/": RuntimeError("HTTP 503")})
+        out = []
+        for i in range(7):
+            out += tge.Watcher(self.cfg, st, T0 + timedelta(hours=2 * i), bad).run()
+        self.assertEqual(len(out), 1)
+        self.assertIn("docs:tori", out[0])
+        good = FakeSession({"https://docs.tori.finance/": SITEMAP_PAGES.format(extra="")})
+        out = tge.Watcher(self.cfg, st, T0 + timedelta(hours=20), good).run()
+        self.assertEqual(len(out), 1)
+        self.assertIn("знову працює", out[0])
+
+    def test_tge_command_and_reminders(self):
+        self.cfg["tge"]["projects"] = {k: dict(v, news_query=None, docs_sitemap=None)
+                                       for k, v in load_config()["tge"]["projects"].items()}
+        self.cfg["tge"]["telegram_channels"] = []
+        st = fresh_state(T0)
+        now = datetime(2026, 11, 1, 9, 0, tzinfo=UTC)   # 11:00 Kyiv
+        reply = tge.cmd_tge(self.cfg, st, now, "strn 20.11.2026")
+        self.assertIn("20.11.2026", reply)
+        self.assertIn("через 19 дн.", reply)
+        self.assertEqual(st["tge"]["dates"]["saturn"], "2026-11-20")
+        self.assertIn("Не знаю", tge.cmd_tge(self.cfg, st, now, "solana 2026-11-01"))
+        run = lambda d: tge.Watcher(self.cfg, st, d, FakeSession({})).run()
+        self.assertEqual(run(now), [])
+        r = run(datetime(2026, 11, 13, 9, 0, tzinfo=UTC))
+        self.assertEqual(len(r), 1)
+        self.assertIn("через <b>7 дн.</b>", r[0])
+        self.assertEqual(run(datetime(2026, 11, 13, 12, 0, tzinfo=UTC)), [])
+        self.assertIn("через <b>1 дн.</b>", run(datetime(2026, 11, 19, 9, 0, tzinfo=UTC))[0])
+        r = run(datetime(2026, 11, 20, 6, 0, tzinfo=UTC))
+        self.assertIn("Сьогодні TGE Saturn", r[0])
+        self.assertIn("фішинг", r[0])
+        self.assertEqual(run(datetime(2026, 11, 20, 9, 0, tzinfo=UTC)), [])
+        # a date set 3 days ahead doesn't produce a «7 days» reminder afterwards
+        tge.cmd_tge(self.cfg, st, now, "infinifi 2026-11-04")
+        self.assertEqual(run(datetime(2026, 11, 1, 12, 0, tzinfo=UTC)), [])
+        # digest + clearing
+        lines = "\n".join(tge.digest_lines(self.cfg, st, now))
+        self.assertIn("Saturn: TGE <b>20.11</b> (через 19 дн.)", lines)
+        self.assertIn("Unitas: TGE відбувся 13.03.2026", lines)
+        self.assertIn("прибрано", tge.cmd_tge(self.cfg, st, now, "saturn off"))
+        self.assertNotIn("saturn", st["tge"]["dates"])
+        self.assertIn("TGE / airdrop", commands.dispatch(
+            commands.Ctx(cfg=self.cfg, state=st, tg=Telegram("t", "1", dry_run=True), now=now), "/tge"))
 
 
 if __name__ == "__main__":
