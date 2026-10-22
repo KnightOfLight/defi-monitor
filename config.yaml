@@ -233,6 +233,9 @@ security:
       - [LEVEL, level]
       - [FXSAVE, fx]
       - [OUTLAND, bridges]
+      - [OUTLAND, layerzero]      # Outland (Base / Monad) — і LayerZero, і CCIP у deployment infiniFi
+      - [OUTLAND, chainlink]
+      - [SILVER, new_silver]
       - [PENDLE, pendle]          # PT інших протоколів — Pendle як місце; базовий актив — у назві
       - [GAUNTLET, gauntlet]
       - [STRCX, strategy]
@@ -301,6 +304,7 @@ security:
     fx:          {name: "f(x) Protocol", aliases: ["f(x) Protocol", fxSAVE, fxUSD]}
     gauntlet:    {name: "Gauntlet (куратор)", aliases: [Gauntlet], strict: true}
     upshift:     {name: Upshift, aliases: [Upshift]}
+    new_silver:  {name: "New Silver (кредити під нерухомість США)", aliases: ["New Silver"]}
     ceffu:       {name: "Ceffu (кастодіан Binance)", aliases: [Ceffu, MirrorX]}
     copper:      {name: "Copper (ClearLoop)", aliases: ["Copper.co", "Copper custody", ClearLoop]}
     binance:     {name: Binance, aliases: [Binance], strict: true}
