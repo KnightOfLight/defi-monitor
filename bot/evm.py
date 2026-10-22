@@ -48,6 +48,12 @@ SEL = {
     "convertToAssets(uint256)": "0x07a2d13a",
     "totalAssets()": "0x01e1d114",
     "asset()": "0x38d52e0f",
+    # security watch: pause / roles / registries (keccak перевірено)
+    "paused()": "0x5c975abb",
+    "owner()": "0x8da5cb5b",
+    "minter()": "0x07546172",
+    "getFarms()": "0x9dc4ac8a",
+    "assetToken()": "0x1083f761",
 }
 ZERO_ADDR = "0x" + "0" * 40
 
@@ -57,6 +63,10 @@ _RETRY_CODES = {-32005, -32029, -32097, 429, -32603}
 
 class RpcError(RuntimeError):
     pass
+
+
+class RpcUnavailable(RpcError):
+    """No RPC endpoint answered (transport / rate limit) — unlike a revert, says nothing about the contract."""
 
 
 def scrub(text: str, urls: list[str]) -> str:
@@ -187,7 +197,7 @@ class Chain:
                 return j.get("result")
             if not self.dead:
                 break
-        raise RpcError(f"усі RPC не відповіли ({', '.join(mask_url(u) for u in self.urls)}): {last_err}")
+        raise RpcUnavailable(f"усі RPC не відповіли ({', '.join(mask_url(u) for u in self.urls)}): {last_err}")
 
     def call(self, to: str, sig: str, *encoded_args: str) -> str:
         data = SEL[sig] + "".join(encoded_args)
@@ -214,6 +224,11 @@ class Chain:
 
     def balance_of(self, token: str, holder: str) -> int:
         return self.uint(token, "balanceOf(address)", enc_addr(holder))
+
+    def storage(self, to: str, slot: str) -> int:
+        """eth_getStorageAt(latest) as an integer."""
+        v = self._rpc("eth_getStorageAt", [to, slot, "latest"])
+        return int(v, 16) if v and v != "0x" else 0
 
     def block_number(self) -> int:
         return int(self._rpc("eth_blockNumber", []), 16)

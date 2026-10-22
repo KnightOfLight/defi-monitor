@@ -179,6 +179,219 @@ tge:
       strict_title: true   # у заголовку новини потрібен alias: «Tori» без Finance — це й Tori Dunlap, Tori Amos
       docs_sitemap: https://docs.tori.finance/sitemap.xml
 
+# --- Безпека: залежності й ознаки зламу ------------------------------------------
+# Три шари (докладно — README, «Безпека»):
+#  1) on-chain ваших протоколів, кожен запуск: оновлення proxy / owner / minter, пауза, стрибок емісії;
+#  2) виміряні залежності: ціни стейблкоїнів-залежностей, TVL DeFi-протоколів (щогодини), фарми infiniFi;
+#  3) новини: слово «hack/exploit/被盗…» + назва вашого проєкту чи його залежності.
+# Залежності зібрано з документації проєктів, Pharos і on-chain станом на 22.10.2026.
+security:
+  enabled: true
+  rescan_hours: 24                # повна перевірка, які proxy/пауза/owner у контракту є
+  supply:
+    jump_warn_pct: 10             # емісія стейбла +10% за один запуск → увага
+    jump_alarm_pct: 50            # +50% → тривога (безконтрольний мінт)
+    drop_warn_pct: 15             # −15% за 24 год → увага (масовий вихід)
+    drop_alarm_pct: 30
+  stables:
+    warn_below: 0.99
+    alarm_below: 0.97
+  tvl_check_hours: 1
+  dep_tvl:
+    window_hours: 6
+    warn_drop_pct: 25             # TVL залежності −25% за 6 год → увага
+    alarm_drop_pct: 40
+  coins_url: https://coins.llama.fi
+  infinifi_farms:
+    enabled: true
+    check_hours: 1
+    # назви фармів — з deployment-файлу infiniFi (адреса → FARM_AAVEV3, FARM_PENDLEV3_RUSD_30OCT25, …)
+    names_url: https://raw.githubusercontent.com/InfiniFi-Labs/infinifi-protocol/master/deployment/configuration/addresses.1.json
+    rules:                        # частина назви фарма → залежність
+      - [AAVE, aave]
+      - [SGHO, aave]
+      - [MORPHO, morpho]
+      - [EULER, euler]
+      - [FLUID, fluid]
+      - [SPARK, spark]
+      - [ETHENA, ethena]
+      - [SUSDE, ethena]
+      - [EUSDE, ethena]
+      - [TUSDE, ethena]
+      - [SRUSDE, ethena]
+      - [MAPLE, maple]
+      - [SYRUPUSDC, maple]
+      - [MIDAS, midas]
+      - [FASANARA, fasanara]
+      - [FALCONX, falconx]
+      - [PARETO, falconx]
+      - [CAP, cap]
+      - [CUSD, cap]
+      - [STCUSD, cap]
+      - [RESERVOIR, reservoir]
+      - [RUSD, reservoir]
+      - [LEVEL, level]
+      - [FXSAVE, fx]
+      - [OUTLAND, bridges]
+      - [PENDLE, pendle]          # PT інших протоколів — Pendle як місце; базовий актив — у назві
+      - [GAUNTLET, gauntlet]
+      - [STRCX, strategy]
+
+  news:
+    check_hours: 0.2              # Telegram і RSS — щозапуску
+    search_check_hours: 1         # Bing і пошук по ваших проєктах — щогодини
+    max_age_hours: 48
+    cooldown_hours: 12            # той самий об'єкт — не частіше раз на 12 год (решта згадок — у /security)
+    fail_alert_checks: 12
+    # Telegram: ті самі канали, що й для TGE (tge.telegram_channels) — сторінки читаються один раз за запуск
+    rss:
+      - https://cointelegraph.com/rss
+      - https://www.theblock.co/rss.xml
+      - https://www.coindesk.com/arc/outboundfeeds/rss/
+      - https://decrypt.co/feed
+      - https://rekt.news/rss/feed.xml
+    gnews_queries: ['(crypto OR DeFi OR stablecoin OR protocol)']
+    bing_queries: ["crypto exploit", "DeFi hack", "stablecoin depeg"]
+    search_keywords: [hack, hacked, exploit, exploited, drained, attack, "security incident", depeg]
+  hack_keywords: [hack, hacked, hacker, hackers, exploit, exploited, exploiter, drained, drains, attack, attacked,
+                  attacker, compromised, stolen, theft, breach, breached, vulnerability, "security incident",
+                  "suspicious transaction", "suspicious transactions", "suspicious activity", "rug pull", insolvent,
+                  insolvency, depeg, depegged, "de-peg", "withdrawals paused", "paused withdrawals",
+                  被盗, 被黑, 黑客, 攻击, 遭攻击, 漏洞, 脱锚, 安全事件, 盗取, 异常交易]
+  # для «широких» назв (Binance, USDC, Solana…): слово має йти одразу за назвою — «Bybit hacked», а не
+  # «hacker sent funds to Binance»
+  strong_keywords: [hack, hacked, exploit, exploited, drained, breach, breached, compromised, insolvent, insolvency,
+                    depeg, depegged, "security incident", "suffers", 被盗, 被黑, 遭攻击, 黑客攻击, 脱锚, 安全事件]
+
+  deps:
+    usdc:        {name: "USDC (Circle)", aliases: [USDC, Circle], strict: true, coin: "ethereum:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"}
+    usdt:        {name: "USDT (Tether)", aliases: [USDT, Tether], strict: true, coin: "ethereum:0xdAC17F958D2ee523a2206206994597C13D831ec7"}
+    pyusd:       {name: "PYUSD (Paxos / PayPal)", aliases: [PYUSD, "PayPal USD", Paxos], strict: true, coin: "ethereum:0x6c3ea9036406852006290770BEdFcAbA0e23A0e8"}
+    pyusdx:      {name: "PYUSDx (MoonPay)", aliases: [PYUSDx, MoonPay], strict: true}
+    usd1:        {name: "USD1 (World Liberty)", aliases: [USD1, "World Liberty Financial"], strict: true, coin: "coingecko:usd1-wlfi"}
+    frxusd:      {name: "frxUSD (Frax)", aliases: [frxUSD, "Frax Finance"], strict: true, coin: "ethereum:0xCAcd6fd266aF91b8AeD52aCCc382b4e165586E29"}
+    ethena:      {name: "Ethena (USDe)", aliases: [Ethena, USDe, sUSDe], coin: "ethereum:0x4c9EDD5852cd905f086C759E8383e09bff1E68B3", llama: ethena-usde}
+    m0:          {name: "M0", aliases: ["M0 Foundation", "M0 protocol", "M^0"]}
+    strategy:    {name: "Strategy (STRC)", aliases: [STRC], # для sUSDat головна подія — не злам, а відкладені дивіденди
+                  extra_keywords: [suspend, suspends, suspended, defer, defers, deferred, deferral, 暂停分红, 推迟分红]}
+    ondo:        {name: "Ondo (STRCon)", aliases: ["Ondo Finance", STRCon, Ondo], strict: true}
+    clear_street: {name: "Clear Street", aliases: ["Clear Street"], strict: true}
+    securitize:  {name: "Securitize", aliases: [Securitize], strict: true}
+    fireblocks:  {name: "Fireblocks", aliases: [Fireblocks], strict: true}
+    chainlink:   {name: "Chainlink (CCIP / оракули)", aliases: [Chainlink, CCIP], strict: true}
+    layerzero:   {name: "LayerZero", aliases: [LayerZero], strict: true}
+    bridges:     {name: "Мости infiniFi Outland (LayerZero / CCIP)", aliases: []}
+    redstone:    {name: "RedStone", aliases: [RedStone], strict: true}
+    pyth:        {name: "Pyth", aliases: ["Pyth Network", Pyth], strict: true}
+    pendle:      {name: Pendle, aliases: [Pendle], llama: pendle}
+    curve:       {name: "Curve Finance", aliases: ["Curve Finance", "Curve pool", "Curve DAO", crvUSD], llama: curve-dex}
+    pancakeswap: {name: PancakeSwap, aliases: [PancakeSwap], strict: true, llama: pancakeswap-amm-v3}
+    fluid:       {name: "Fluid (Instadapp)", aliases: ["Fluid DEX", "Fluid protocol", "Fluid lending", Instadapp], llama: fluid-lending}
+    morpho:      {name: Morpho, aliases: [Morpho], llama: morpho-blue}
+    aave:        {name: Aave, aliases: [Aave, GHO, sGHO], strict: true, llama: aave-v3}
+    euler:       {name: Euler, aliases: ["Euler Finance", Euler], llama: euler-v2}
+    spark:       {name: Spark, aliases: [SparkLend, "Spark Protocol", "Spark savings"], llama: sparklend}
+    maple:       {name: Maple, aliases: ["Maple Finance", syrupUSDC, Maple], strict: true, llama: maple}
+    cap:         {name: Cap, aliases: ["Cap Labs", "Cap protocol", cUSD]}
+    midas:       {name: "Midas (mGLOBAL)", aliases: ["Midas RWA", mGLOBAL]}
+    fasanara:    {name: "Fasanara (через Midas)", aliases: [Fasanara]}
+    falconx:     {name: "FalconX / Pareto", aliases: [FalconX, "Pareto Credit"], strict: true}
+    reservoir:   {name: "Reservoir (rUSD)", aliases: ["Reservoir protocol", rUSD, wsrUSD]}
+    level:       {name: "Level (lvlUSD)", aliases: ["Level USD", lvlUSD]}
+    fx:          {name: "f(x) Protocol", aliases: ["f(x) Protocol", fxSAVE, fxUSD]}
+    gauntlet:    {name: "Gauntlet (куратор)", aliases: [Gauntlet], strict: true}
+    upshift:     {name: Upshift, aliases: [Upshift]}
+    ceffu:       {name: "Ceffu (кастодіан Binance)", aliases: [Ceffu, MirrorX]}
+    copper:      {name: "Copper (ClearLoop)", aliases: ["Copper.co", "Copper custody", ClearLoop]}
+    binance:     {name: Binance, aliases: [Binance], strict: true}
+    cex_generic: {name: "Великі біржі (OKX, Bybit, Deribit, Hyperliquid)", aliases: [OKX, Bybit, Deribit, Hyperliquid], strict: true}
+    jupiter:     {name: "Jupiter (JLP)", aliases: ["Jupiter Exchange", "Jupiter Perps", JLP], strict: true, llama: jupiter-perpetual-exchange}
+    solana:      {name: Solana, aliases: [Solana], strict: true}
+    bnbchain:    {name: "BNB Chain", aliases: ["BNB Chain", "BNB Smart Chain"], strict: true}
+
+  projects:
+    tori:
+      name: Tori
+      aliases: ["Tori Finance", trUSD, strUSD, "Tori Cores"]
+      deps:
+        pendle: "ваша позиція — ринок PT/LP trUSD (погашення 26.11)"
+        fluid: "найбільший пул виходу trUSD/USDC (~58% обсягу торгів)"
+        curve: "пул frxUSD/trUSD — звідси бот бере ціну trUSD"
+        frxusd: "друга сторона пулу Curve"
+        morpho: "PT-trUSD — застава на Morpho: ліквідації тиснуть на ціну PT"
+        usdc: "застава для мінту trUSD"
+        usdt: "застава для мінту trUSD"
+        chainlink: "CCIP — міст trUSD між мережами"
+        layerzero: "OFT-контракти Tori (за аудитом Nethermind)"
+        redstone: "оракул strUSD на Monad"
+        upshift: "інфраструктура Ecosystem Vault (куратор RockawayX)"
+        cex_generic: "резерви у кастодіанів і на «біржах» — Tori не розкриває, на яких"
+      contracts:
+        - {label: trUSD, address: "0xd0580192E98eA6CEB9c7b6191Ed2E27560911697", supply: true}
+        - {label: strUSD, address: "0x280839980a7eD0D7717F64125fE241012E5F5815", supply: true}
+        - {label: ToriMinting, resolve: {from: "0xd0580192E98eA6CEB9c7b6191Ed2E27560911697", getter: "minter()"},
+           note: "Контракт мінту/погашення trUSD (адреса — з trUSD.minter())."}
+        - {label: SY-trUSD (Pendle), address: "0xa09482f2f6cb5f2177b05144bc276d06b8b818eb",
+           note: "Обгортка trUSD у ринку Pendle, де ваша позиція."}
+    saturn:
+      name: Saturn
+      aliases: ["Saturn Credit", "Saturn Labs", "Saturn Foundation", "Saturn protocol", USDat, sUSDat, STRN]
+      exclude: [Oil, Gas, NASA, planet, rocket]
+      deps:
+        pyusdx: "PYUSDx — забезпечення USDat на Ethereum (емітент MoonPay)"
+        pyusd: "PYUSD (Paxos) — забезпечення PYUSDx"
+        m0: "M0 — розширення й маршрут мінту USDat"
+        usdc: "мінт і погашення USDat"
+        strategy: "STRC — 100% експозиції sUSDat; ризик — відкладені дивіденди"
+        ondo: "STRCon (Ondo) — через нього sUSDat тримає STRC"
+        clear_street: "кастодіан STRC"
+        securitize: "адміністратор фонду STRC"
+        fireblocks: "MPC-гаманці Saturn (2-of-3)"
+        chainlink: "ціновий фід STRC для NAV sUSDat"
+        curve: "пули USDC/USDat і USDC/sUSDat — вихід"
+        pancakeswap: "пули USDat/sUSDat на BNB Chain"
+        pendle: "ринки Saturn на Pendle"
+      contracts:
+        - {label: USDat, address: "0x23238f20b894f29041f48D88eE91131C395Aaa71", supply: true}
+        - {label: sUSDat, address: "0xD166337499E176bbC38a1FBd113Ab144e5bd2Df7", supply: true}
+        - {label: Withdraw, address: "0x4Bc9FEC04F0F95e9b42a3EF18F3C96fB57923D2e", note: "Черга виведення sUSDat."}
+        - {label: PYUSDx SwapFacility, address: "0x0bC305e7e13113cAEd3f5486849e9518a1cC4173"}
+    unitas:
+      name: Unitas
+      aliases: [Unitas, "Unitas Labs", sUSDu]
+      exclude: [Johnny, Colts, NFL, football, quarterback]
+      deps:
+        ceffu: "кастодіан хедж-капіталу (MirrorX → суб-рахунок Binance)"
+        copper: "кастодіан off-exchange settlement"
+        binance: "шорт-перпи й маржа — основне місце хеджу, ~19% резервів"
+        jupiter: "JLP — частина резервів (~$12.5 млн на 16.10)"
+        usd1: "USD1 — частина резервів"
+        usdt: "пул USDu/USDT на PancakeSwap, частина резервів"
+        usdc: "мінт USDu"
+        pancakeswap: "пул USDu/USDT — вихід (~$0.7 млн)"
+        pendle: "sUSDu на Pendle (BSC)"
+        solana: "мережа USDu і частини резервів"
+        bnbchain: "мережа USDu (BSC)"
+        pyth: "оракул (за docs Unitas)"
+      contracts:
+        - {label: USDu (BSC), chain: bsc, address: "0xea953ea6634d55dac6697c436b1e81a679db5882", supply: true,
+           note: "Лише частина USDu на BSC; на Solana — окрема емісія."}
+        - {label: UnitasMintingV2 (BSC), chain: bsc, address: "0xbb984ce670100aa855f6152f88b26ee57f4ea82a"}
+    infinifi:
+      name: infiniFi
+      aliases: [infiniFi, siUSD, liUSD, "infiniFi USD"]
+      deps:
+        usdc: "усі депозити й погашення — в USDC"
+        bridges: "Outland: частина активів на Base і Monad"
+        # решта — живий розподіл фармів on-chain (/deps infinifi); новини матчаться з усіма фармами від 0.5%
+      contracts:
+        - {label: Gateway, address: "0x3f04b65Ddbd87f9CE0A2e7Eb24d80e7fb87625b5"}
+        - {label: MintController, address: "0x49877d937B9a00d50557bdC3D87287b5c3a4C256"}
+        - {label: RedeemController, address: "0xCb1747E89a43DEdcF4A2b831a0D94859EFeC7601"}
+        - {label: iUSD, address: "0x48f9e38f3070AD8945DFEae3FA70987722E3D89c", supply: true}
+        - {label: siUSD, address: "0xDBDC1Ef57537E34680B898E1FEBD3D68c7389bCB"}
+        - {label: LockingController, address: "0x1d95cC100D6Cd9C7BbDbD7Cb328d99b3D6037fF7"}
+
 # --- Файли стану ---------------------------------------------------------------
 files:
   journal: data/journal.csv

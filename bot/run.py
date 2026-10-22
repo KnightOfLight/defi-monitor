@@ -16,7 +16,7 @@ import sys
 import time
 import traceback
 
-from . import __version__, fmt, sources, tge
+from . import __version__, fmt, security, sources, tge
 from .alerts import AlertEngine, warmup_note
 from .commands import Ctx, handle_updates, status_text
 from .config import load_config, require_telegram
@@ -27,6 +27,9 @@ from .telegram import Telegram
 from .weekly import run_weekly
 
 
+UPGRADE_NOTE_1_2 = ("стеження за безпекою: on-chain нагляд за контрактами ваших протоколів (оновлення proxy, "
+                    "пауза, різкий мінт), ціни стейблкоїнів і TVL протоколів, від яких вони залежать, новини про "
+                    "хаки зі збігом назв. Команди <code>/deps</code> і <code>/security</code>.")
 UPGRADE_NOTE = ("додано Tori — ринок Pendle trUSD (PT, implied APY, ліквідність, погашення 26.11), ціна trUSD, "
                 "курс strUSD, TVL Tori, поінти <code>/log tori …</code>; стеження за анонсами TGE / airdrop "
                 "(<code>/tge</code>); прибрано моніторинг пулу Curve USDC/USDat (ціна USDat лишилась).")
@@ -71,7 +74,12 @@ def monitor_pass(ctx: Ctx, process_commands: bool = True) -> None:
 
     ctx.metrics, ctx.errors = collect(cfg)
     ctx.history = load_history(cfg["files"]["history"])
+    web = security.CachedSession()                     # спільний кеш сторінок для TGE і новин про хаки
+    chains = {"ethereum": Chain(cfg["sources"]["rpc"]["ethereum"]), "bsc": Chain(cfg["sources"]["rpc"]["bsc"])}
+    sec_findings, sec_errors = security.collect(cfg, state, ctx.now, web, chains)
+    ctx.errors.update(sec_errors)
     engine = AlertEngine(cfg, state, ctx.now)
+    security.apply(engine, sec_findings, state)        # пауза / оновлення контракту / мінт — першими
     messages = engine.run(ctx.metrics, ctx.history, ctx.errors)
 
     if process_commands:
@@ -86,12 +94,19 @@ def monitor_pass(ctx: Ctx, process_commands: bool = True) -> None:
     elif state.get("announced_version") != __version__:
         for obsolete in ("curve_share", "curve_liquidity"):     # алерти пулу Curve USDat прибрані у v1.1
             state.get("alerts", {}).pop(obsolete, None)
-        ctx.tg.send(f"🔄 Бот оновлено до v{__version__}: {UPGRADE_NOTE}\n\n" + status_text(ctx))
+        note = UPGRADE_NOTE_1_2 if str(state.get("announced_version") or "").startswith("1.1") \
+            else UPGRADE_NOTE + "\nТакож " + UPGRADE_NOTE_1_2
+        ctx.tg.send(f"🔄 Бот оновлено до v{__version__}: {note}\n\n" + status_text(ctx))
     state["announced_version"] = __version__
     for msg in messages:
         ctx.tg.send(msg)
+    try:                                   # новини про хаки: ніколи не ламають моніторинг
+        for msg in security.run_news(cfg, state, ctx.now, web):
+            ctx.tg.send(msg)
+    except Exception as e:
+        print(f"[warn] hack news: {e}", file=sys.stderr)
     try:                                   # TGE-новини: власний розклад (check_hours), ніколи не ламає моніторинг
-        for msg in tge.run_tge(cfg, state, ctx.now):
+        for msg in tge.run_tge(cfg, state, ctx.now, session=web):
             ctx.tg.send(msg)
     except Exception as e:
         print(f"[warn] TGE watcher: {e}", file=sys.stderr)
@@ -288,6 +303,87 @@ def cmd_selftest(args) -> int:
                 else f"{len(posts)} останніх постів"
         check(f"TGE · Telegram @{ch}", _tg, soft=True)
 
+    # --- безпека (усе «м'яке»: не валить self-test) ---------------------------
+    SEC = cfg.get("security") or {}
+    if SEC.get("enabled", True):
+        chains = {"ethereum": eth, "bsc": bsc}
+        for c in security.contract_list(cfg):
+            def _sec(c=c):
+                ch = chains[c.get("chain", "ethereum")]
+                addr = c.get("address") or ch.addr(c["resolve"]["from"], c["resolve"]["getter"])
+                got = {}
+                for k in list(security.ADDR_PROBES) + ["paused"] + (["supply"] if c.get("supply") else []):
+                    try:
+                        v = security.probe(ch, addr, k)
+                    except Exception:
+                        continue
+                    if v is not None:
+                        got[k] = v
+                if not got:
+                    raise RuntimeError(f"{addr}: жодна перевірка не застосовна — адреса правильна?")
+                show = []
+                for k, v in got.items():
+                    show.append(f"{k}={security.short(v) if isinstance(v, str) else (fmt.num(v) if k == 'supply' else v)}")
+                return f"{security.short(addr)}: " + ", ".join(show)
+            check(f"Безпека · {c['project_name']} · {c['label']}", _sec, soft=True)
+
+        def _stables():
+            import requests as _rq
+            got = security.stable_prices(cfg, _rq.Session())
+            want = [k for k, d in SEC.get("deps", {}).items() if d.get("coin")]
+            miss = [k for k in want if k not in got]
+            res = ", ".join(f"{k} {v:.4f}" for k, v in got.items())
+            if miss:
+                raise RuntimeError(f"немає ціни для {', '.join(miss)}; є: {res}")
+            return res
+        check("Безпека · ціни стейблів-залежностей", _stables, soft=True)
+
+        import requests as _rq
+        _s = _rq.Session()
+        bad_slugs, ok_slugs = [], []
+        for k, d in SEC.get("deps", {}).items():
+            if d.get("llama"):
+                try:
+                    ok_slugs.append(f"{d['llama']} {security.llama_tvl(cfg, d['llama'], _s) / 1e6:.0f}M")
+                except Exception as e:
+                    bad_slugs.append(f"{d['llama']} ({str(e)[:60]})")
+        lines.append(("✅" if not bad_slugs else "⚠️") + " Безпека · TVL залежностей (DefiLlama): "
+                     + ", ".join(ok_slugs) + (f" | не знайдено: {'; '.join(bad_slugs)}" if bad_slugs else ""))
+
+        def _farms():
+            F = SEC.get("infinifi_farms") or {}
+            items = security.infinifi_farms(eth, E["infinifi_gateway"])
+            names = security.farm_names(F["names_url"], _s) if F.get("names_url") else {}
+            rules = [tuple(x) for x in F.get("rules") or []]
+            total = sum(x["usd"] for x in items) or 1
+            agg: dict = {}
+            for it in items:
+                n = names.get(it["addr"], "?")
+                dep = security.farm_dep(n, rules) or n.replace("FARM_", "")
+                agg[dep] = agg.get(dep, 0) + it["usd"]
+            top = sorted(agg.items(), key=lambda x: -x[1])[:6]
+            named = sum(1 for it in items if it["addr"] in names)
+            return (f"{len(items)} фармів (з назвами {named}), ${total / 1e6:.1f}M; топ: "
+                    + ", ".join(f"{k} {v / total * 100:.0f}%" for k, v in top))
+        check("Безпека · фарми infiniFi", _farms, soft=True)
+
+        N = SEC.get("news") or {}
+        for url in N.get("rss") or []:
+            def _rss(url=url):
+                r = _s.get(url, headers=security.UA, timeout=15)
+                r.raise_for_status()
+                items = tge.parse_rss(r.text, "rss")
+                if not items:
+                    raise RuntimeError("порожня стрічка")
+                newest = max((x["ts"] for x in items if x["ts"]), default=None)
+                return f"{len(items)} статей" + (f", найновіша {newest:%d.%m %H:%M} UTC" if newest else "")
+            check(f"Безпека · RSS {url.split('/')[2]}", _rss, soft=True)
+        hk = [k for k in N.get("search_keywords", []) if str(k).isascii()]
+        for q in N.get("gnews_queries") or []:
+            check("Безпека · Google News (хаки)", lambda q=q: f"{len(tge.google_news(q, hk, 1))} статей за добу", soft=True)
+        for q in N.get("bing_queries") or []:
+            check(f"Безпека · Bing «{q}»", lambda q=q: f"{len(tge.bing_news(q))} статей", soft=True)
+
     tg_ok = bool(cfg["telegram"]["token"] and cfg["telegram"]["chat_id"])
     if tg_ok:
         tg = Telegram(cfg["telegram"]["token"], cfg["telegram"]["chat_id"])
@@ -299,19 +395,21 @@ def cmd_selftest(args) -> int:
     lines.append("РЕЗУЛЬТАТ: " + ("усе працює ✅" if ok_all else "є помилки ❌ — див. вище"))
     report = "\n".join(lines)
     if os.environ.get("GITHUB_ACTIONS") == "true":
-        # анотації запуску видно в Actions без завантаження логу; GitHub показує лише 10 на крок,
-        # тому: кожен ❌/⚠️ окремо, а TGE-рядки — пачками по ~900 символів
-        bad = [ln for ln in lines if ln.startswith(("❌", "⚠️"))][:6]
+        # анотації запуску видно в Actions без завантаження логу; GitHub показує до 10 кожного типу на крок:
+        # ❌/⚠️ — як warning (по одному), ✅ TGE/Безпека — notice пачками по ~900 символів
+        bad = [ln for ln in lines if ln.startswith(("❌", "⚠️"))]
+        for ln in bad[:10]:
+            print("::warning title=self-test::" + ln.replace("%", "%25").replace("\n", " ")[:1000])
         chunks, cur = [], ""
-        for ln in (x for x in lines if "TGE ·" in x and x.startswith("✅")):
-            ln = ln.replace("✅ TGE · ", "")[:200]
+        for ln in (x for x in lines if x.startswith("✅") and ("TGE ·" in x or "Безпека ·" in x)):
+            ln = ln.replace("✅ ", "")[:220]
             if len(cur) + len(ln) > 900:
                 chunks.append(cur)
                 cur = ""
             cur = f"{cur} | {ln}" if cur else ln
         if cur:
             chunks.append(cur)
-        for ln in bad + chunks[:3]:
+        for ln in chunks[:10]:
             print("::notice title=self-test::" + ln.replace("%", "%25").replace("\n", " ")[:1000])
     # console copy hides the bot username: Actions logs of a public repo are visible to everyone
     print(re.sub(r"бот @\S+", "бот @…", report))

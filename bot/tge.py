@@ -57,6 +57,8 @@ _DATE_RES = [
 def _term_re(term: str) -> re.Pattern:
     # межі слова лише по латиниці/цифрах: «$INFI» і «协议infiniFi宣布» збігаються, «INFINITY» — ні;
     # китайські ключові слова (空投 …) шукаються як підрядок
+    if not term.isascii():                                   # 空投 у «infiniFi空投» — без меж слова
+        return re.compile(re.escape(term), re.I)
     return re.compile(r"(?<![A-Za-z0-9_])" + re.escape(term) + r"(?![A-Za-z0-9_])", re.I)
 
 
@@ -475,8 +477,8 @@ class Watcher:
         self.st["items"] = self.st["items"][-40:]
 
 
-def run_tge(cfg: dict, state: dict, now: datetime, force: bool = False) -> list[str]:
-    return Watcher(cfg, state, now).run(force=force)
+def run_tge(cfg: dict, state: dict, now: datetime, force: bool = False, session=None) -> list[str]:
+    return Watcher(cfg, state, now, session).run(force=force)
 
 
 # --------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 """Offline tests — run with:  python -m unittest -v tests.test_offline"""
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
@@ -12,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from bot import alerts, commands, evm, sources, storage, tge, weekly  # noqa: E402
+from bot import alerts, commands, evm, security, sources, storage, tge, weekly  # noqa: E402
 from bot.config import load_config  # noqa: E402
 from bot.telegram import Telegram  # noqa: E402
 
@@ -46,6 +47,9 @@ class FakeChain:
 
     def balance_of(self, token, holder):
         return self.uint(token, "balanceOf(address)", evm.enc_addr(holder))
+
+    def storage(self, to, slot):
+        return self.table.get((to.lower(), "slot:" + slot), 0)
 
 
 def word(v: int) -> str:
@@ -506,6 +510,9 @@ class FakeResp:
     def raise_for_status(self):
         pass
 
+    def json(self):
+        return json.loads(self.text)
+
 
 class FakeSession:
     def __init__(self, pages):
@@ -551,6 +558,7 @@ class TestTge(unittest.TestCase):
         # китайський текст: латинська назва без пробілів і китайські ключові слова
         self.assertEqual(tge.hits("加密协议infiniFi公布代币经济学", ["infiniFi"]), ["infiniFi"])
         self.assertEqual(tge.hits("infiniFi宣布空投快照时间", ["空投", "TGE"]), ["空投"])
+        self.assertEqual(tge.hits("Saturn空投", ["空投"]), ["空投"])
         self.assertEqual(tge.hits("Bybit: New Crypto Perpetual Listing: INFIUSDT", ["INFI", "INFIUSDT"]), ["INFIUSDT"])
         self.assertNotEqual(tge.hid_title("Saturn 宣布 TGE"), tge.hid_title("Tori 宣布空投"))
         seen_urls = []
@@ -738,6 +746,209 @@ class TestTge(unittest.TestCase):
         self.assertNotIn("saturn", st["tge"]["dates"])
         self.assertIn("TGE / airdrop", commands.dispatch(
             commands.Ctx(cfg=self.cfg, state=st, tg=Telegram("t", "1", dry_run=True), now=now), "/tge"))
+
+
+# --------------------------------------------------------------------------
+class TestSecurity(unittest.TestCase):
+    TRUSD = "0xd0580192E98eA6CEB9c7b6191Ed2E27560911697"
+    MINTER = "0x" + "e1" * 20
+
+    def setUp(self):
+        self.cfg = load_config()
+        S = self.cfg["security"]
+        S["projects"] = {"tori": dict(S["projects"]["tori"], contracts=[
+            {"label": "trUSD", "address": self.TRUSD, "supply": True},
+            {"label": "ToriMinting", "resolve": {"from": self.TRUSD, "getter": "minter()"}}])}
+        self.impl = 0x1111
+        self.paused = 0
+        self.supply = 70_000_000
+
+    def chain(self):
+        t, m = self.TRUSD.lower(), self.MINTER
+        return FakeChain({
+            (t, "slot:" + security.SLOTS["impl"]): self.impl,
+            (t, "minter()"): addr_word(m),
+            (t, "totalSupply()"): word(int(self.supply * 10 ** 18)),
+            (t, "decimals()"): word(18),
+            (m, "paused()"): word(self.paused),
+        })
+
+    def run_once(self, st, now):
+        eng = alerts.AlertEngine(self.cfg, st, now)
+        o = security.Onchain(self.cfg, st, now, {"ethereum": self.chain()})
+        o.run()
+        security.apply(eng, o.findings, st)
+        return eng.messages, o
+
+    def test_onchain_upgrade_pause_mint(self):
+        st = fresh_state(T0 - timedelta(days=30))
+        msgs, o = self.run_once(st, T0)
+        self.assertEqual(msgs, [])                                   # перший прохід лише запам'ятовує
+        rec = st["security"]["contracts"]["ethereum:" + self.TRUSD.lower()]
+        self.assertEqual(sorted(rec["kinds"]), ["impl", "minter", "supply"])
+        mint = st["security"]["contracts"]["ethereum:" + self.MINTER]
+        self.assertEqual(mint["kinds"], ["paused"])
+        self.assertEqual(self.run_once(st, T0 + timedelta(minutes=15))[0], [])
+        # implementation changed → one-off alarm
+        self.impl = 0x2222
+        msgs, _ = self.run_once(st, T0 + timedelta(minutes=30))
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("ТРИВОГА", msgs[0])
+        self.assertIn("змінено реалізацію", msgs[0])
+        self.assertIn("0x0000…1111", msgs[0])
+        self.assertEqual(self.run_once(st, T0 + timedelta(minutes=45))[0], [])
+        # pause → alarm, repeat only after 6 h, unpause → «норма»
+        self.paused = 1
+        msgs, _ = self.run_once(st, T0 + timedelta(hours=1))
+        self.assertTrue(any("на <b>паузу</b>" in x for x in msgs))
+        self.assertEqual(self.run_once(st, T0 + timedelta(hours=2))[0], [])
+        self.paused = 0
+        msgs, _ = self.run_once(st, T0 + timedelta(hours=3))
+        self.assertTrue(any("НОРМА" in x and "паузу знято" in x for x in msgs))
+        # supply +60% in one run → alarm event
+        self.supply = 112_000_000
+        msgs, _ = self.run_once(st, T0 + timedelta(hours=3, minutes=15))
+        self.assertTrue(any("емісія різко зросла на <b>60.0%</b>" in x and "ТРИВОГА" in x for x in msgs))
+        # then −40% vs the 24 h peak → drop condition
+        self.supply = 67_000_000
+        msgs, _ = self.run_once(st, T0 + timedelta(hours=4))
+        self.assertTrue(any("емісія впала" in x for x in msgs))
+        self.assertTrue(st["alerts"]["sec_supply_drop_tori_trUSD"]["active"])
+        self.assertTrue(any("змінено" in x or "емісія" in x for _, x in st["security"]["log"]))
+        # minter changed → the resolved ToriMinting is a new contract, trUSD reports the minter change
+        self.MINTER = "0x" + "e2" * 20
+        msgs, _ = self.run_once(st, T0 + timedelta(hours=5))
+        self.assertTrue(any("змінено мінтера" in x for x in msgs))
+        # full rescan after 24 h keeps working
+        self.assertIsInstance(self.run_once(st, T0 + timedelta(days=2))[0], list)
+
+    def test_rpc_down_on_first_scan_is_retried(self):
+        class Down(FakeChain):
+            def call(self, to, sig, *a):
+                raise evm.RpcUnavailable("усі RPC не відповіли")
+
+            def storage(self, to, slot):
+                raise evm.RpcUnavailable("усі RPC не відповіли")
+        st = fresh_state(T0)
+        o = security.Onchain(self.cfg, st, T0, {"ethereum": Down({})})
+        o.run()
+        self.assertEqual(list(o.errors), ["sec:onchain:ethereum"])     # одна помилка на мережу, не на контракт
+        self.assertEqual(st["security"]["contracts"], {})
+        msgs, _ = self.run_once(st, T0 + timedelta(minutes=15))
+        self.assertEqual(msgs, [])
+        self.assertEqual(len(st["security"]["contracts"]), 2)
+
+    def test_news_matching(self):
+        T = self.cfg["security"]
+        st = fresh_state(T0)
+        st.setdefault("security", {})["farms"] = {"total": 100, "items": [
+            {"addr": "a", "name": "FARM_MORPHO_GAUNTLETCORE", "usd": 30, "dep": "morpho"},
+            {"addr": "b", "name": "FARM_PENDLEV3_RUSD_30OCT25", "usd": 70, "dep": "pendle"}]}
+        targets = security.news_targets(self.cfg, st)
+        keys = {t["key"] for t in targets}
+        self.assertIn("own:tori", keys)
+        self.assertIn("dep:morpho", keys)                            # з фармів infiniFi
+        m = lambda title, full=False: [t["key"] for t in security.match(
+            {"title": title, "text": title}, targets, T, full)]
+        self.assertEqual(m("Bybit hacked for $1.5B in largest crypto heist"), ["dep:cex_generic"])
+        self.assertEqual(m("Bybit suffers $1.5B exploit"), ["dep:cex_generic"])
+        self.assertEqual(m("Hacker moves stolen funds to Binance and OKX"), [])
+        self.assertEqual(m("Bybit被盗约15亿美元"), ["dep:cex_generic"])
+        self.assertEqual(m("Pendle exploited: attacker drains $3M from SY contract"), ["dep:pendle"])
+        self.assertEqual(m("Tori Finance exploit drains trUSD liquidity on Pendle"), ["own:tori"])
+        self.assertEqual(m("Morpho vault curator warns of bad debt after oracle attack"), ["dep:morpho"])
+        self.assertEqual(m("Pendle launches new trUSD market"), [])
+        self.cfg["security"]["projects"]["saturn"] = load_config()["security"]["projects"]["saturn"]
+        targets = security.news_targets(self.cfg, st)
+        self.assertEqual(m("Saturn Oil & Gas hit by cyber attack"), [])
+        self.assertEqual(m("Strategy suspends STRC dividend amid bitcoin slump"), ["dep:strategy"])
+        self.assertEqual(m("Strategy raises STRC dividend to 11.5%"), [])
+        self.assertEqual(m("USDat depegs to $0.95 as Curve pool drains"), ["own:saturn"])
+        who = security.dependents(self.cfg, st, "pendle")
+        self.assertTrue(any("ринок PT/LP trUSD" in w for _, w in who))
+        self.assertEqual(security.farm_dep("FARM_PENDLEV3_RUSD_30OCT25", [("RUSD", "reservoir"), ("PENDLE", "pendle")]),
+                         "reservoir")
+        self.assertEqual(security.farm_dep("FARM_CAP_LIQUID_V2", [("CAP", "cap")]), "cap")
+        self.assertIsNone(security.farm_dep("FARM_ESCAPE", [("CAP", "cap")]))
+        self.assertEqual(security.farm_deps("FARM_PENDLEV3_RUSD_30OCT25", [("RUSD", "reservoir"), ("PENDLE", "pendle")]),
+                         ["reservoir", "pendle"])
+
+    def test_hack_news_seed_cooldown(self):
+        from email.utils import format_datetime
+        self.cfg["security"]["news"] = {"rss": ["https://news.example/rss"], "check_hours": 0.2, "cooldown_hours": 12}
+        self.cfg["tge"]["telegram_channels"] = []
+        self.cfg["tge"]["projects"] = {}
+        feed = {"v": ""}
+
+        def rss(items):
+            body = "".join(f"<item><title>{t}</title><link>https://n/{i}</link><guid>{g}</guid>"
+                           f"<pubDate>{format_datetime(d)}</pubDate></item>" for i, (t, g, d) in enumerate(items))
+            return f'<?xml version="1.0"?><rss><channel>{body}</channel></rss>'
+        sess = FakeSession({"https://news.example/": lambda: feed["v"]})
+        st = fresh_state(T0)
+        feed["v"] = rss([("Pendle exploited for $2M", "old", T0 - timedelta(hours=1))])
+        self.assertEqual(security.run_news(self.cfg, st, T0, sess), [])          # перший прохід тихий
+        feed["v"] = rss([("Pendle exploited for $2M", "old", T0 - timedelta(hours=1)),
+                         ("Tori Finance hacked, trUSD depegs", "n1", T0 + timedelta(minutes=10))])
+        msgs = security.run_news(self.cfg, st, T0 + timedelta(minutes=15), sess)
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("ТРИВОГА · можливий злам: Tori", msgs[0])
+        self.assertNotIn("Pendle exploited", msgs[0])
+        # the same story from another outlet within the cooldown → no message, kept for /security
+        feed["v"] = rss([("trUSD issuer Tori Finance confirms exploit", "n2", T0 + timedelta(minutes=20))])
+        self.assertEqual(security.run_news(self.cfg, st, T0 + timedelta(minutes=30), sess), [])
+        self.assertEqual(len(st["security"]["news"]["items"]), 2)
+        txt = security.security_text(self.cfg, st, T0 + timedelta(minutes=30))
+        self.assertIn("confirms exploit", txt)
+        self.assertIn("Безпека: подій за тиждень — 1", security.digest_line(st, T0 + timedelta(hours=1)))
+
+    def test_measured_stables_tvl_farms(self):
+        st = fresh_state(T0)
+        prices = {"usdc": 1.0, "usdt": 0.985, "frxusd": 0.96}
+        S = self.cfg["security"]
+        coins = {k: d["coin"] for k, d in S["deps"].items() if d.get("coin")}
+        payload = {"coins": {coins[k]: {"price": v} for k, v in prices.items()}}
+        tvl = {"v": 100e6}
+        sess = FakeSession({"https://coins.llama.fi/": lambda: json.dumps(payload),
+                            "https://api.llama.fi/tvl/": lambda: str(tvl["v"])})
+        S["infinifi_farms"]["enabled"] = False
+        S["deps"] = {k: S["deps"][k] for k in ("usdc", "usdt", "frxusd", "pendle", "morpho")}
+        eng = alerts.AlertEngine(self.cfg, st, T0)
+        mm = security.Measured(self.cfg, st, T0, sess, {})
+        mm.run()
+        security.apply(eng, mm.findings, st)
+        self.assertTrue(any("USDT (Tether)" in x and "УВАГА" in x for x in eng.messages))
+        self.assertTrue(any("frxUSD" in x and "ТРИВОГА" in x and "Tori" in x for x in eng.messages))
+        tvl["v"] = 55e6                                              # −45% за годину
+        eng = alerts.AlertEngine(self.cfg, st, T0 + timedelta(hours=1))
+        mm = security.Measured(self.cfg, st, T0 + timedelta(hours=1), sess, {})
+        mm.run()
+        security.apply(eng, mm.findings, st)
+        self.assertTrue(any("TVL залежності <b>Pendle</b>" in x and "ТРИВОГА" in x for x in eng.messages))
+        st["security"]["farms"] = {"at": storage.iso(T0), "total": 50e6, "items": [
+            {"addr": "a", "name": "FARM_MAPLE_SYRUPUSDC", "usd": 30e6, "dep": "maple"},
+            {"addr": "b", "name": "FARM_PENDLEV3_RUSD_30OCT25", "usd": 20e6, "dep": "reservoir",
+             "deps": ["reservoir", "pendle"]}]}
+        txt = security.deps_text(load_config(), st, T0, "infinifi")
+        self.assertIn("60.0%  Maple", txt)
+        self.assertIn("Reservoir (rUSD) через Pendle", txt)
+        self.assertAlmostEqual(security.farm_shares(st)["pendle"], 40.0)
+        self.assertIn("активних тривог", security.status_line(load_config(), st))   # USDT, frxUSD, TVL Pendle…
+        self.assertIn("тривог немає", security.status_line(load_config(), fresh_state(T0)))
+        self.assertIn("On-chain нагляд", txt)
+        self.assertIn("Tori", security.deps_text(load_config(), st, T0))
+        self.assertIn("Не знаю", security.deps_text(load_config(), st, T0, "solana"))
+
+    def test_cached_session(self):
+        n = {"c": 0}
+
+        def page():
+            n["c"] += 1
+            return "x"
+        cs = security.CachedSession(FakeSession({"https://t.me/s/a": page}))
+        cs.get("https://t.me/s/a", headers={"a": 1})
+        cs.get("https://t.me/s/a", headers={"b": 2})
+        self.assertEqual(n["c"], 1)
 
 
 if __name__ == "__main__":

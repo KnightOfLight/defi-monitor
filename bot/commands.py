@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from . import fmt, tge
+from . import fmt, security, tge
 from .alerts import status_levels
 from .metrics import collect
 from .storage import (POINTS_COLUMNS, journal_row_from_metrics, last_row_with_points, load_history,
@@ -34,6 +34,8 @@ HELP = """<b>Команди бота</b>
 /thresholds — показати пороги алертів
 /tge — що відомо про TGE / airdrop кожного проєкту + останні знайдені новини
 /tge saturn 2026-11-20 — задати підтверджену дату TGE (нагадаю за 7 і 1 день); /tge saturn off — прибрати
+/deps — від чого залежить кожен проєкт (біржі, кастодіани, протоколи, стейбли) + живий розподіл фармів infiniFi; /deps tori — один проєкт
+/security — стан контрактів під наглядом, ціни стейблів-залежностей, останні новини про хаки
 /help — ця довідка
 
 Бот запускається за розкладом, тому відповідь на команду приходить при наступному запуску (до 30 хв на GitHub Actions)."""
@@ -110,6 +112,10 @@ def dispatch(ctx: Ctx, text: str) -> str | None:
         return cmd_export(ctx)
     if cmd == "/thresholds":
         return thresholds_text(ctx.cfg)
+    if cmd == "/deps":
+        return security.deps_text(ctx.cfg, ctx.state, ctx.now, arg.lower().strip())
+    if cmd in ("/security", "/sec"):
+        return security.security_text(ctx.cfg, ctx.state, ctx.now)
     if cmd in ("/tge", "/airdrop"):
         return tge.cmd_tge(ctx.cfg, ctx.state, ctx.now, arg)
     if cmd.startswith("/"):
@@ -154,6 +160,9 @@ def status_text(ctx: Ctx) -> str:
     if uy is not None:
         lines.append(f"Unaccrued yield: {fmt.num(uy)} iUSD" + (" ⚠️ (від'ємний = незараховані збитки)" if uy < 0 else ""))
     lines.append("")
+    if (ctx.cfg.get("security") or {}).get("enabled", True):
+        lines.append(security.status_line(ctx.cfg, ctx.state))
+        lines.append("")
     lines.append(f"<i>Історія для порівнянь: {lv['_history_hours']} год.</i>")
     if ctx.errors:
         lines.append("")
@@ -189,6 +198,16 @@ def pendle_status_lines(cfg: dict, m: dict, lv: dict, state: dict, now: datetime
 # --------------------------------------------------------------------------
 # /thresholds
 # --------------------------------------------------------------------------
+def security_thresholds(cfg: dict) -> str:
+    T = cfg.get("security") or {}
+    sp, st, dt = T.get("supply") or {}, T.get("stables") or {}, T.get("dep_tvl") or {}
+    return (f"Безпека: оновлення proxy / owner / minter і пауза контракту → тривога; емісія стейбла "
+            f"+{sp.get('jump_warn_pct', 10)}% за запуск → увага, +{sp.get('jump_alarm_pct', 50)}% → тривога, "
+            f"−{sp.get('drop_warn_pct', 15)}% за 24 год → увага; стейбл-залежність &lt; {st.get('warn_below', 0.99)} → увага, "
+            f"&lt; {st.get('alarm_below', 0.97)} → тривога; TVL залежності −{dt.get('warn_drop_pct', 25)}% за "
+            f"{dt.get('window_hours', 6)} год → увага; новина «hack/exploit» + назва проєкту → тривога, + назва залежності → увага")
+
+
 def thresholds_text(cfg: dict) -> str:
     A = cfg["alerts"]
     P, T, I = A["price"], A["tvl"], A["infinifi"]
@@ -207,6 +226,7 @@ def thresholds_text(cfg: dict) -> str:
         f"−{PP.get('liquidity_drop_24h_warn_pct', 25)}% за 24 год або −{PP.get('liquidity_drop_7d_warn_pct', 30)}% за 7 дн → увага; "
         f"нагадування за {', '.join(str(d) for d in PP.get('maturity_remind_days', [14, 7, 2]))} дн до погашення",
         "Tori: будь-яке падіння курсу strUSD (списаний збиток) → тривога",
+        security_thresholds(cfg),
         f"InfiniFi: резерв &lt; {I['reserve_warn_pct']}% TVL {I['reserve_warn_days']} дн поспіль → увага; "
         f"черга redemption &gt; {I['queue_alarm_hours']} год → тривога; будь-яке падіння rate liUSD-13w → тривога",
         f"Антиспам: повтор раз на {A['repeat_hours']} год; warm-up {A['warmup_days']} дн "

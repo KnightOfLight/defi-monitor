@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from . import fmt, tge
+from . import fmt, security, tge
 from .commands import LOG_EXAMPLE, POINT_LABELS, Ctx
 from .storage import (POINTS_COLUMNS, journal_row_from_metrics, last_row_with_points, load_journal, save_journal,
                       to_float, value_ago)
@@ -106,6 +106,8 @@ def send_digest(ctx: Ctx, today: str) -> None:
                  f"у strUSD {fmt.pct(m.get('strusd_buffer_pct'))} усього trUSD")
     lines.append("")
 
+    if (ctx.cfg.get("security") or {}).get("enabled", True):
+        lines += [security.digest_line(ctx.state, ctx.now), ""]
     tl = tge.digest_lines(ctx.cfg, ctx.state, ctx.now)
     if tl:
         lines += tl + [""]
