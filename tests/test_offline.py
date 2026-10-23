@@ -864,6 +864,18 @@ class TestSecurity(unittest.TestCase):
         self.assertEqual(m("Strategy suspends STRC dividend amid bitcoin slump"), ["dep:strategy"])
         self.assertEqual(m("Strategy raises STRC dividend to 11.5%"), [])
         self.assertEqual(m("USDat depegs to $0.95 as Curve pool drains"), ["own:saturn"])
+        # регресія 23.10: довгий пост Foresight про механізм Lido Lend (на Morpho Blue) зі словами 被盗/黑客攻击
+        # як гіпотетичних подій — не злам Morpho
+        lido = {"title": "【Lido：Turbulence Controls 机制可在极端事件中按市场冻结或暂停借贷操作】",
+                "text": "【Lido：Turbulence Controls 机制可在极端事件中按市场冻结或暂停借贷操作】\n"
+                        "Lido 宣布为其开发中的借贷产品 Lido Lend 推出 Turbulence Controls 机制。Lido Lend 基于 Morpho Blue 构建。"
+                        "该机制允许治理指定的委员会在抵押品被盗、黑客攻击、粉尘攻击或流动性危机等极端事件中限制单个市场的借贷。"}
+        self.assertEqual([t["key"] for t in security.match(lido, targets, T, True)], [])
+        hit = {"title": "【Morpho 上某借贷市场遭黑客攻击，损失约 300 万美元】", "text": "【Morpho 上某借贷市场遭黑客攻击，损失约 300 万美元】"}
+        self.assertEqual([t["key"] for t in security.match(hit, targets, T, True)], ["dep:morpho"])
+        own_body = {"title": "Foresight 早报", "text": "Foresight 早报\n1. 比特币回落。\n2. Tori Finance 遭攻击，trUSD 短暂脱锚。"}
+        self.assertEqual([t["key"] for t in security.match(own_body, targets, T, True)], ["own:tori"])
+        self.assertEqual(m("Pendle launches bug bounty to prevent exploits"), [])
         who = security.dependents(self.cfg, st, "pendle")
         self.assertTrue(any("ринок PT/LP trUSD" in w for _, w in who))
         self.assertEqual(security.farm_dep("FARM_PENDLEV3_RUSD_30OCT25", [("RUSD", "reservoir"), ("PENDLE", "pendle")]),

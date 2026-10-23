@@ -487,22 +487,39 @@ def _strict_hit(text: str, alias: str, strong: list[str]) -> bool:
     return False
 
 
+_SENT = re.compile(r"[。！？!?；;\n]+|(?<=[a-z0-9\)])\.\s+")
+
+
+def sentences(text: str) -> list[str]:
+    return [x.strip() for x in _SENT.split(text or "") if x.strip()]
+
+
+def _hit_in(s: str, t: dict, kws: list[str], strong: list[str]) -> bool:
+    extra = list(t.get("extra_keywords") or [])
+    if not (tge.hits(s, kws) or (extra and tge.hits(s, extra))):
+        return False
+    if t["strict"]:
+        return any(_strict_hit(s, a, strong + extra) for a in t["aliases"])
+    return bool(tge.hits(s, t["aliases"]))
+
+
 def match(item: dict, targets: list[dict], T: dict, scope_full: bool) -> list[dict]:
-    text = item["text"] if scope_full else item["title"]
+    """Where the words must meet:
+    * a dependency — only in the headline (RSS title / first line of a Telegram post): a long post that mentions
+      «Morpho» in one sentence and «黑客攻击» as a hypothetical in another is not about a Morpho hack;
+    * your own project — in the headline or in one sentence of the post body (missing a real incident costs more).
+    A headline about protection (bug bounty, «防范黑客», «protect against exploits») is skipped."""
+    head = item["title"]
+    if tge.hits(head, [str(k) for k in T.get("ignore_keywords", [])]):
+        return []
     kws = [str(k) for k in T.get("hack_keywords", [])]
     strong = [str(k) for k in T.get("strong_keywords", [])]
+    body = sentences(item["text"]) if scope_full else []
     out = []
-    has_kw = bool(tge.hits(text, kws))
     for t in targets:
-        if tge.hits(text, list(t.get("exclude") or [])):
-            continue
-        extra = list(t.get("extra_keywords") or [])
-        if not has_kw and not (extra and tge.hits(text, extra)):
-            continue
-        if t["strict"]:
-            if any(_strict_hit(text, a, strong + extra) for a in t["aliases"]):
-                out.append(t)
-        elif tge.hits(text, t["aliases"]):
+        scopes = [head] + (body if t["own"] else [])
+        scopes = [x for x in scopes if not tge.hits(x, list(t.get("exclude") or []))]
+        if any(_hit_in(x, t, kws, strong) for x in scopes):
             out.append(t)
     own = [t for t in out if t["own"]]
     return own or out

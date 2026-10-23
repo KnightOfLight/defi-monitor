@@ -261,6 +261,9 @@ security:
                   "suspicious transaction", "suspicious transactions", "suspicious activity", "rug pull", insolvent,
                   insolvency, depeg, depegged, "de-peg", "withdrawals paused", "paused withdrawals",
                   被盗, 被黑, 黑客, 攻击, 遭攻击, 漏洞, 脱锚, 安全事件, 盗取, 异常交易]
+  # заголовок про захист, а не про інцидент — пропускаємо
+  ignore_keywords: [漏洞赏金, "bug bounty", 防范, 防止, 预防, 防御, 演练, prevent, prevents, "protect against",
+                    "protects against", safeguard, safeguards, drill]
   # для «широких» назв (Binance, USDC, Solana…): слово має йти одразу за назвою — «Bybit hacked», а не
   # «hacker sent funds to Binance»
   strong_keywords: [hack, hacked, exploit, exploited, drained, breach, breached, compromised, insolvent, insolvency,
