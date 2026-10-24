@@ -876,6 +876,14 @@ class TestSecurity(unittest.TestCase):
         own_body = {"title": "Foresight 早报", "text": "Foresight 早报\n1. 比特币回落。\n2. Tori Finance 遭攻击，trUSD 短暂脱锚。"}
         self.assertEqual([t["key"] for t in security.match(own_body, targets, T, True)], ["own:tori"])
         self.assertEqual(m("Pendle launches bug bounty to prevent exploits"), [])
+        # регресія 24.10: прес-реліз, де злам — у Drift, а Morpho — в іншій частині заголовка
+        self.assertEqual(m("Cryptocurrency News: Reported Drift Hack Transfers Hit $61.56M as Remittix Earn Readies "
+                           "Morpho, Fluid and Maple Finance Pools - StreetInsider"), [])
+        self.assertEqual(m("Drift Hack Transfers Hit $61.56M as Morpho Curators Review Exposure"), [])
+        self.assertEqual(m("Drift hacked, Morpho unaffected"), [])
+        self.assertEqual(m("Morpho vault drained as attacker manipulates oracle"), ["dep:morpho"])
+        self.assertEqual(m("Morpho pauses market after $3M exploit"), ["dep:morpho"])
+        self.assertEqual(m("Pendle: exploit drains $2M from SY contract"), ["dep:pendle"])
         who = security.dependents(self.cfg, st, "pendle")
         self.assertTrue(any("ринок PT/LP trUSD" in w for _, w in who))
         self.assertEqual(security.farm_dep("FARM_PENDLEV3_RUSD_30OCT25", [("RUSD", "reservoir"), ("PENDLE", "pendle")]),

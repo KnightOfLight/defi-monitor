@@ -259,15 +259,20 @@ security:
   hack_keywords: [hack, hacked, hacker, hackers, exploit, exploited, exploiter, drained, drains, attack, attacked,
                   attacker, compromised, stolen, theft, breach, breached, vulnerability, "security incident",
                   "suspicious transaction", "suspicious transactions", "suspicious activity", "rug pull", insolvent,
-                  insolvency, depeg, depegged, "de-peg", "withdrawals paused", "paused withdrawals",
+                  insolvency, depeg, depegs, depegged, depegging, "de-peg", draining, exploits, hacks,
+                  "withdrawals paused", "paused withdrawals",
                   被盗, 被黑, 黑客, 攻击, 遭攻击, 漏洞, 脱锚, 安全事件, 盗取, 异常交易]
   # заголовок про захист, а не про інцидент — пропускаємо
   ignore_keywords: [漏洞赏金, "bug bounty", 防范, 防止, 预防, 防御, 演练, prevent, prevents, "protect against",
-                    "protects against", safeguard, safeguards, drill]
+                    "protects against", safeguard, safeguards, drill,
+                    # проплачені прес-релізи «presale»-монет, які чіпляють у заголовок модні назви
+                    presale, pre-sale, Remittix, BlockDAG, "Little Pepe", "Ozak AI", MAGACOIN]
+  unaffected_keywords: [unaffected, "not affected", "not impacted", "remain safe", "funds are safe", "funds safe",
+                        未受影响, 不受影响, 资金安全]
   # для «широких» назв (Binance, USDC, Solana…): слово має йти одразу за назвою — «Bybit hacked», а не
   # «hacker sent funds to Binance»
   strong_keywords: [hack, hacked, exploit, exploited, drained, breach, breached, compromised, insolvent, insolvency,
-                    depeg, depegged, "security incident", "suffers", 被盗, 被黑, 遭攻击, 黑客攻击, 脱锚, 安全事件]
+                    depeg, depegs, depegged, "security incident", "suffers", 被盗, 被黑, 遭攻击, 黑客攻击, 脱锚, 安全事件]
 
   deps:
     usdc:        {name: "USDC (Circle)", aliases: [USDC, Circle], strict: true, coin: "ethereum:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"}

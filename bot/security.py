@@ -494,6 +494,15 @@ def sentences(text: str) -> list[str]:
     return [x.strip() for x in _SENT.split(text or "") if x.strip()]
 
 
+# частини заголовка, що можуть говорити про різні об'єкти: «Drift Hack Transfers Hit $61M | as | Remittix Readies
+# Morpho Pools», «Drift hacked, | Morpho unaffected». Двокрапку не ділимо: «Pendle: exploit drains $2M» — один сюжет.
+_CLAUSE = re.compile(r"\s+(?:as|amid|while|whereas|but)\s+|,\s+|[，；;|]|\s[-–—]\s", re.I)
+
+
+def clauses(text: str) -> list[str]:
+    return [x.strip() for x in _CLAUSE.split(text or "") if x.strip()]
+
+
 def _hit_in(s: str, t: dict, kws: list[str], strong: list[str]) -> bool:
     extra = list(t.get("extra_keywords") or [])
     if not (tge.hits(s, kws) or (extra and tge.hits(s, extra))):
@@ -507,18 +516,20 @@ def match(item: dict, targets: list[dict], T: dict, scope_full: bool) -> list[di
     """Where the words must meet:
     * a dependency — only in the headline (RSS title / first line of a Telegram post): a long post that mentions
       «Morpho» in one sentence and «黑客攻击» as a hypothetical in another is not about a Morpho hack;
-    * your own project — in the headline or in one sentence of the post body (missing a real incident costs more).
+    * your own project — in the headline or in one sentence of the post body (missing a real incident costs more);
+    * in both cases inside one clause: «Drift hack … as Remittix readies Morpho pools» is about Drift.
     A headline about protection (bug bounty, «防范黑客», «protect against exploits») is skipped."""
     head = item["title"]
     if tge.hits(head, [str(k) for k in T.get("ignore_keywords", [])]):
         return []
     kws = [str(k) for k in T.get("hack_keywords", [])]
     strong = [str(k) for k in T.get("strong_keywords", [])]
+    unaffected = [str(k) for k in T.get("unaffected_keywords", [])]
     body = sentences(item["text"]) if scope_full else []
     out = []
     for t in targets:
-        scopes = [head] + (body if t["own"] else [])
-        scopes = [x for x in scopes if not tge.hits(x, list(t.get("exclude") or []))]
+        scopes = [c for x in [head] + (body if t["own"] else []) for c in clauses(x)]
+        scopes = [x for x in scopes if not tge.hits(x, list(t.get("exclude") or []) + unaffected)]
         if any(_hit_in(x, t, kws, strong) for x in scopes):
             out.append(t)
     own = [t for t in out if t["own"]]
