@@ -922,6 +922,48 @@ class TestSecurity(unittest.TestCase):
         self.assertIn("confirms exploit", txt)
         self.assertIn("Безпека: подій за тиждень — 1", security.digest_line(st, T0 + timedelta(hours=1)))
 
+    def test_dependency_news_needs_numbers(self):
+        """Регресія 26.10: «CoinDCX admits $16M USDT loss…» — злам біржі CoinDCX, а не Tether."""
+        from email.utils import format_datetime
+        cfg = load_config()
+        cfg["security"]["news"] = dict(cfg["security"]["news"], rss=["https://news.example/rss"],
+                                       telegram_channels=["none"], gnews_queries=[], bing_queries=[])
+        cfg["tge"]["projects"] = {}
+        feed = {"v": ""}
+
+        def rss(items):
+            body = "".join(f"<item><title>{t}</title><link>https://n/{g}</link><guid>{g}</guid>"
+                           f"<pubDate>{format_datetime(d)}</pubDate></item>" for t, g, d in items)
+            return f'<?xml version="1.0"?><rss><channel>{body}</channel></rss>'
+        sess = FakeSession({"https://news.example/": lambda: feed["v"], "https://t.me/s/none": "tgme_widget_message"})
+        st = fresh_state(T0)
+        feed["v"] = rss([])
+        security.run_news(cfg, st, T0, sess)                                    # тихий перший прохід
+        st["security"]["prices"] = {"usdt": 1.0001}
+        feed["v"] = rss([("CoinDCX admits $16M USDT loss days after CEO dismissed hack alerts", "a", T0)])
+        self.assertEqual(security.run_news(cfg, st, T0 + timedelta(minutes=15), sess), [])
+        self.assertTrue(st["security"]["news"]["items"][-1]["quiet"])
+        self.assertIn("🔇", security.security_text(cfg, st, T0 + timedelta(minutes=15)))
+        # той самий сюжет, але USDT уже $0.98 → надсилаємо з цифрами
+        st["security"]["prices"] = {"usdt": 0.98}
+        feed["v"] = rss([("Tether USDT depegs to $0.98 after reserve breach", "b", T0 + timedelta(minutes=20))])
+        msgs = security.run_news(cfg, st, T0 + timedelta(minutes=30), sess)
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("Цифри теж рухаються: <b>ціна USDT (Tether) = $0.9800</b>", msgs[0])
+        self.assertIn("Стосується Unitas", msgs[0])
+        # кастодіан без цифр — одразу
+        feed["v"] = rss([("Ceffu hacked: $40M drained from hot wallets", "c", T0 + timedelta(minutes=40))])
+        msgs = security.run_news(cfg, st, T0 + timedelta(minutes=45), sess)
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("Ceffu", msgs[0])
+        self.assertNotIn("Цифри", msgs[0])
+        # алерт по ціні стейбла сам підтягує свіжі новини про нього
+        mm = security.Measured(cfg, st, T0 + timedelta(hours=1), FakeSession({}), {})
+        self.assertIn("Новини за добу", mm._who("usdt"))
+        self.assertIn("depegs to $0.98", mm._who("usdt"))
+        # Morpho більше не пряма залежність Tori (тиск на PT і так видно в алерті по ціні PT)
+        self.assertNotIn("morpho", cfg["security"]["projects"]["tori"]["deps"])
+
     def test_measured_stables_tvl_farms(self):
         st = fresh_state(T0)
         prices = {"usdc": 1.0, "usdt": 0.985, "frxusd": 0.96}

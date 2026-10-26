@@ -205,7 +205,8 @@ def security_thresholds(cfg: dict) -> str:
             f"+{sp.get('jump_warn_pct', 10)}% за запуск → увага, +{sp.get('jump_alarm_pct', 50)}% → тривога, "
             f"−{sp.get('drop_warn_pct', 15)}% за 24 год → увага; стейбл-залежність &lt; {st.get('warn_below', 0.99)} → увага, "
             f"&lt; {st.get('alarm_below', 0.97)} → тривога; TVL залежності −{dt.get('warn_drop_pct', 25)}% за "
-            f"{dt.get('window_hours', 6)} год → увага; новина «hack/exploit» + назва проєкту → тривога, + назва залежності → увага")
+            f"{dt.get('window_hours', 6)} год → увага; новина «hack/exploit» + назва проєкту → тривога; + назва залежності → увага "
+            f"(для стейблів і протоколів — лише якщо ціна чи TVL теж рухаються)")
 
 
 def thresholds_text(cfg: dict) -> str:

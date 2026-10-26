@@ -245,6 +245,10 @@ security:
     search_check_hours: 1         # Bing і пошук по ваших проєктах — щогодини
     max_age_hours: 48
     cooldown_hours: 12            # той самий об'єкт — не частіше раз на 12 год (решта згадок — у /security)
+    # Новина про залежність, яку бот вимірює (є coin або llama), надсилається, лише якщо цифри теж рухаються:
+    # ціна стейбла < 0.995 або TVL протоколу −10% за 6 год. Інакше — тихо в /security.
+    # Для залежностей без цифр (кастодіани, біржі, мости) і для ваших проєктів — надсилається одразу.
+    corroborate: {price_below: 0.995, tvl_drop_pct: 10, window_hours: 6}
     fail_alert_checks: 12
     # Telegram: ті самі канали, що й для TGE (tge.telegram_channels) — сторінки читаються один раз за запуск
     rss:
@@ -330,7 +334,6 @@ security:
         fluid: "найбільший пул виходу trUSD/USDC (~58% обсягу торгів)"
         curve: "пул frxUSD/trUSD — звідси бот бере ціну trUSD"
         frxusd: "друга сторона пулу Curve"
-        morpho: "PT-trUSD — застава на Morpho: ліквідації тиснуть на ціну PT"
         usdc: "застава для мінту trUSD"
         usdt: "застава для мінту trUSD"
         chainlink: "CCIP — міст trUSD між мережами"

@@ -387,7 +387,11 @@ class Measured:
 
     def _who(self, dep_key: str) -> str:
         who = dependents(self.cfg, self.state, dep_key)
-        return "\n".join(f"• {esc(n)}: {esc(w)}" for n, w in who) or "• (прямих залежностей не знайдено)"
+        out = "\n".join(f"• {esc(n)}: {esc(w)}" for n, w in who) or "• (прямих залежностей не знайдено)"
+        news = recent_news(self.state, dep_key, self.now)
+        if news:
+            out += "\nНовини за добу:\n" + "\n".join(f"• {esc(x['title'][:160])} — {esc(x['link'])}" for x in news)
+        return out
 
     def run(self) -> None:
         # stablecoins every run — one request
@@ -536,6 +540,34 @@ def match(item: dict, targets: list[dict], T: dict, scope_full: bool) -> list[di
     return own or out
 
 
+def measured(cfg: dict, dep_key: str) -> bool:
+    d = deps(cfg).get(dep_key) or {}
+    return bool(d.get("coin") or d.get("llama"))
+
+
+def corroboration(cfg: dict, state: dict, dep_key: str, now: datetime) -> str | None:
+    """Do the numbers back the news? Price of a stablecoin or TVL of a protocol already moving."""
+    C = (S(cfg).get("news") or {}).get("corroborate") or {}
+    st = _st(state)
+    price = (st.get("prices") or {}).get(dep_key)
+    if price is not None and price < float(C.get("price_below", 0.995)):
+        return f"ціна {deps(cfg)[dep_key].get('name', dep_key)} = {fmt.price(price)}"
+    hist = st["tvl"].get(dep_key) or []
+    window = now - timedelta(hours=float(C.get("window_hours", 6)))
+    recent = [h[1] for h in hist if (parse_iso(h[0]) or now) >= window]
+    if recent and hist:
+        drop = (1 - hist[-1][1] / max(recent)) * 100
+        if drop >= float(C.get("tvl_drop_pct", 10)):
+            return f"TVL {deps(cfg)[dep_key].get('name', dep_key)} −{drop:.0f}% за {C.get('window_hours', 6)} год"
+    return None
+
+
+def recent_news(state: dict, dep_key: str, now: datetime, hours: float = 24) -> list[dict]:
+    items = (_st(state)["news"].get("items") or [])
+    return [x for x in items if x.get("target") == f"dep:{dep_key}"
+            and (parse_iso(x.get("ts")) or now) >= now - timedelta(hours=hours)][-2:]
+
+
 class HackNews:
     def __init__(self, cfg: dict, state: dict, now: datetime, session):
         self.cfg, self.state, self.now, self.session = cfg, state, now, session
@@ -615,19 +647,28 @@ class HackNews:
             self.st["seeded"][key] = True
         for tkey, (t, items) in found.items():
             last = parse_iso(self.st["cooldown"].get(tkey))
+            # Залежність, яку бот вимірює (ціна стейбла / TVL протоколу): новина сама по собі — лише в /security.
+            # Ключові слова не розуміють, хто жертва («CoinDCX lost $16M USDT» — не проблема Tether), а справжній
+            # злам Morpho чи депег USDT видно в цифрах — тоді прийде або цей алерт, або алерт по ціні/TVL з новинами.
+            proof = None if t["own"] or not measured(self.cfg, t.get("dep", "")) else \
+                corroboration(self.cfg, self.state, t["dep"], self.now)
+            quiet = not t["own"] and measured(self.cfg, t.get("dep", "")) and not proof
             for it in items:
                 self.st["items"].append({"target": tkey, "name": t["name"], "title": it["title"][:200],
-                                         "link": it["link"], "via": it["via"], "ts": iso(it.get("ts") or self.now)})
+                                         "link": it["link"], "via": it["via"], "ts": iso(it.get("ts") or self.now),
+                                         "quiet": quiet})
+            if quiet:
+                continue
             if last and self.now - last < cool:
                 continue                                   # той самий сюжет з інших джерел — у /security
             self.st["cooldown"][tkey] = iso(self.now)
-            self.messages.append(self._report(t, items))
+            self.messages.append(self._report(t, items, proof))
         cutoff = self.now - timedelta(days=30)
         self.st["seen"] = {k: v for k, v in self.st["seen"].items() if (parse_iso(v) or self.now) >= cutoff}
         self.st["items"] = self.st["items"][-60:]
         return self.messages
 
-    def _report(self, t: dict, items: list[dict]) -> str:
+    def _report(self, t: dict, items: list[dict], proof: str | None = None) -> str:
         if t["own"]:
             head = (f"🚨 <b>ТРИВОГА · можливий злам: {esc(t['name'])}</b>\n"
                     f"Новини пов'язують ваш протокол зі зламом / атакою:")
@@ -636,8 +677,10 @@ class HackNews:
         else:
             who = dependents(self.cfg, self.state, t["dep"])
             head = (f"⚠️ <b>Можливий злам залежності: {esc(t['name'])}</b>\n"
+                    + (f"Цифри теж рухаються: <b>{esc(proof)}</b>\n" if proof else "")
                     + "\n".join(f"Стосується {esc(n)}: {esc(w)}" for n, w in who))
-            tail = "Перевірте, чи це справді про ваш протокол, — бот шукає лише збіг назви і слова «hack/exploit»."
+            tail = ("Бот знайшов назву і слово «hack/exploit» в одному заголовку" + (" і підтвердження в цифрах" if proof else "")
+                    + "; хто саме постраждав — перевірте за посиланням.")
         lines = [head]
         for it in items[:4]:
             when = it["ts"].astimezone(self.tz).strftime("%d.%m %H:%M") if it.get("ts") else ""
@@ -768,10 +811,11 @@ def security_text(cfg: dict, state: dict, now: datetime) -> str:
     items = st["news"]["items"][-5:]
     if items:
         lines.append("")
-        lines.append("<b>Останні новини про хаки зі збігом</b>")
+        lines.append("<b>Останні новини про хаки зі збігом</b> (🔇 — без підтвердження цифрами, не надсилалось)")
         for x in reversed(items):
             ts = parse_iso(x.get("ts"))
-            lines.append(f"• {ts.astimezone(tz):%d.%m %H:%M} · {esc(x['name'])}: {esc(x['title'][:120])}\n  {esc(x['link'])}")
+            lines.append(f"• {'🔇 ' if x.get('quiet') else ''}{ts.astimezone(tz):%d.%m %H:%M} · {esc(x['name'])}: "
+                         f"{esc(x['title'][:120])}\n  {esc(x['link'])}")
     chk = parse_iso(st.get("scanned_at"))
     lines.append("")
     lines.append(f"<i>Повна перевірка контрактів: {chk.astimezone(tz):%d.%m %H:%M}; далі — кожен запуск.</i>" if chk else
