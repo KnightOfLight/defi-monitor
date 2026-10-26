@@ -11,7 +11,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import sys
 import time
 import traceback
@@ -65,6 +65,8 @@ def monitor_pass(ctx: Ctx, process_commands: bool = True) -> None:
     first_run = not state.get("started_at")
     if first_run:
         state["started_at"] = iso(ctx.now)
+    runs = [r for r in state.get("runs") or [] if (parse_iso(r) or ctx.now) >= ctx.now - timedelta(days=7)]
+    state["runs"] = runs + [iso(ctx.now)]                # щоб бачити, як часто GitHub насправді запускає бота
     refresh_pendle_markets(cfg, state, ctx.now)
     if not state.get("pendle_markets_seeded") and state.get("pendle_markets_checked_at"):
         # markets that already exist at the very first successful check are not «new» — remember them silently
@@ -105,6 +107,10 @@ def monitor_pass(ctx: Ctx, process_commands: bool = True) -> None:
             ctx.tg.send(msg)
     except Exception as e:
         print(f"[warn] hack news: {e}", file=sys.stderr)
+    try:                                   # дайджест / нагадування — з будь-якого запуску, не лише з weekly.yml
+        run_weekly(ctx)
+    except Exception as e:
+        print(f"[warn] weekly from monitor: {e}", file=sys.stderr)
     try:                                   # TGE-новини: власний розклад (check_hours), ніколи не ламає моніторинг
         for msg in tge.run_tge(cfg, state, ctx.now, session=web):
             ctx.tg.send(msg)

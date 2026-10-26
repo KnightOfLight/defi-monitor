@@ -426,6 +426,21 @@ class TestCommandsAndWeekly(unittest.TestCase):
         self.assertNotIn("Частка USDat", status)
         self.assertIn("Pendle trUSD", commands.dispatch(nxt, "/thresholds"))
 
+    def test_late_github_run_still_sends_digest(self):
+        # 23.10.2026: «07:00 UTC» weekly run actually started 12:18 UTC (15:18 Kyiv) — the old 10–12 window skipped it
+        late = self.ctx(datetime(2026, 10, 23, 12, 18, tzinfo=UTC))
+        self.assertEqual(weekly.run_weekly(late), "digest")
+        again = commands.Ctx(cfg=self.cfg, state=late.state, tg=self.tg, now=datetime(2026, 10, 23, 19, 0, tzinfo=UTC))
+        again.metrics, again.errors, again.history = base_metrics(), {}, []
+        self.assertEqual(weekly.run_weekly(again), "idle")
+        early = self.ctx(datetime(2026, 10, 23, 6, 30, tzinfo=UTC))           # 09:30 Kyiv — ще рано
+        self.assertEqual(weekly.run_weekly(early), "idle")
+        st = {"runs": [storage.iso(T0 - timedelta(hours=h)) for h in (11, 5, 4.75, 0.25)]}
+        line = commands.runs_line(st, T0)
+        self.assertIn("Запусків за добу: 4", line)
+        self.assertIn("найдовша пауза 6.0 год", line)
+        self.assertIn("рідше, ніж треба", line)
+
     def test_winter_time_hour_selection(self):
         # January: Kyiv = UTC+2, so 07:00 UTC is 09:00 (idle) and 08:00 UTC is 10:00 (digest)
         fri7 = self.ctx(datetime(2027, 1, 15, 7, 2, tzinfo=UTC))

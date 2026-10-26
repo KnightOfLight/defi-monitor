@@ -164,12 +164,27 @@ def status_text(ctx: Ctx) -> str:
         lines.append(security.status_line(ctx.cfg, ctx.state))
         lines.append("")
     lines.append(f"<i>Історія для порівнянь: {lv['_history_hours']} год.</i>")
+    rl = runs_line(ctx.state, ctx.now)
+    if rl:
+        lines.append(rl)
     if ctx.errors:
         lines.append("")
         lines.append("<b>Помилки джерел</b>")
         for k, v in ctx.errors.items():
             lines.append(f"• <code>{esc(k)}</code>: {esc(v[:200])}")
     return "\n".join(lines)
+
+
+def runs_line(state: dict, now: datetime) -> str | None:
+    """How often GitHub actually ran the monitor in the last 24 h (the cron says every 15 min)."""
+    from .storage import parse_iso
+    runs = sorted(t for t in (parse_iso(r) for r in state.get("runs") or []) if t and t >= now - timedelta(hours=24))
+    if len(runs) < 2:
+        return None
+    gaps = [(b - a).total_seconds() / 60 for a, b in zip(runs, runs[1:])]
+    worst = max(gaps)
+    warn = " ⚠️ GitHub запускає бота рідше, ніж треба — див. README «Розклад»" if worst > 60 else ""
+    return f"<i>Запусків за добу: {len(runs)} (найдовша пауза {worst / 60:.1f} год){warn}</i>"
 
 
 def pendle_status_lines(cfg: dict, m: dict, lv: dict, state: dict, now: datetime) -> list[str]:

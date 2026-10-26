@@ -11,11 +11,12 @@ from .telegram import esc
 
 
 def _due(ctx: Ctx, weekday: int) -> bool:
-    """True when local time is <weekday> at the configured hour (or the next one —
-    GitHub cron can run late, and the UTC schedule covers both DST offsets)."""
+    """True on <weekday> from the configured hour until midnight. GitHub runs scheduled workflows hours late
+    (observed: the 07:00 UTC Friday run started at 12:18 UTC), so a narrow window silently skips the digest;
+    digest_sent_date / reminder_sent_date keep it to one per day."""
     local = ctx.local_now()
     hour = int(ctx.cfg["weekly"]["hour"])
-    return local.weekday() == weekday and hour <= local.hour <= hour + 2
+    return local.weekday() == weekday and local.hour >= hour
 
 
 def run_weekly(ctx: Ctx, force: str | None = None) -> str:
