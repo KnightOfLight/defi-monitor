@@ -899,6 +899,14 @@ class TestSecurity(unittest.TestCase):
         self.assertEqual(m("Morpho vault drained as attacker manipulates oracle"), ["dep:morpho"])
         self.assertEqual(m("Morpho pauses market after $3M exploit"), ["dep:morpho"])
         self.assertEqual(m("Pendle: exploit drains $2M from SY contract"), ["dep:pendle"])
+        # регресія 29.10: суд за квітневий злам Kelp — не новий інцидент LayerZero
+        lz = [dict(t, strict=True, aliases=["LayerZero"], key="dep:layerzero", own=False, exclude=[], dep="layerzero")
+              for t in targets[:1]]
+        ml = lambda title: [t["key"] for t in security.match({"title": title, "text": title}, lz, T, False)]
+        self.assertEqual(ml("KelpDAO sues LayerZero over the $292 million bridge hack that gutted Aave - Startup Fortune"), [])
+        self.assertEqual(ml("LayerZero DVN compromised, attacker drains $50M from OFT bridges"), ["dep:layerzero"])
+        self.assertEqual(m("Pendle exploiter arrested in Spain"), [])
+        self.assertEqual(m("Bybit hack explained: how Lazarus did it"), [])
         who = security.dependents(self.cfg, st, "pendle")
         self.assertTrue(any("ринок PT/LP trUSD" in w for _, w in who))
         self.assertEqual(security.farm_dep("FARM_PENDLEV3_RUSD_30OCT25", [("RUSD", "reservoir"), ("PENDLE", "pendle")]),

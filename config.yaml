@@ -270,7 +270,14 @@ security:
   ignore_keywords: [漏洞赏金, "bug bounty", 防范, 防止, 预防, 防御, 演练, prevent, prevents, "protect against",
                     "protects against", safeguard, safeguards, drill,
                     # проплачені прес-релізи «presale»-монет, які чіпляють у заголовок модні назви
-                    presale, pre-sale, Remittix, BlockDAG, "Little Pepe", "Ozak AI", MAGACOIN]
+                    presale, pre-sale, Remittix, BlockDAG, "Little Pepe", "Ozak AI", MAGACOIN,
+                    # наслідки давніх зламів — суди, арешти, повернення коштів, огляди: це не новий інцидент
+                    sues, sued, suing, lawsuit, "files suit", court, judge, trial, indicted, charged,
+                    arrested, sentenced, extradited, convicted, "pleads guilty", recovers, recovered, "returns funds",
+                    "funds returned", reimburse, reimburses, reimbursement, compensation, "post-mortem", postmortem,
+                    anniversary, "months after", "year after", "years after", "biggest hacks", "largest hacks",
+                    "top hacks", "lessons learned", explained, "a look back",
+                    起诉, 诉讼, 法院, 判决, 逮捕, 被捕, 赔偿, 追回, 复盘, 回顾]
   unaffected_keywords: [unaffected, "not affected", "not impacted", "remain safe", "funds are safe", "funds safe",
                         未受影响, 不受影响, 资金安全]
   # для «широких» назв (Binance, USDC, Solana…): слово має йти одразу за назвою — «Bybit hacked», а не
