@@ -396,7 +396,8 @@ class Watcher:
             # Google News + Bing News: the query pins the project; the title must name it and carry a keyword
             engines = []
             if p.get("news_query"):
-                engines.append(("gnews", lambda p=p: google_news(p["news_query"], news_kws,
+                pk = list(news_kws) + [x for x in p.get("extra_keywords", []) if str(x).isascii()]
+                engines.append(("gnews", lambda p=p, pk=pk: google_news(p["news_query"], pk,
                                                                  int(self.T.get("news_days", 14)), self.session)))
             for i, bq in enumerate(p.get("bing_queries") or []):
                 engines.append((f"bing{i or ''}", lambda bq=bq: bing_news(bq, self.session)))
@@ -407,7 +408,8 @@ class Watcher:
                 items = self._guard(sk, fn)
                 if items is not None:
                     for it in items:
-                        if hits(it["title"], names) and hits(it["title"], kws) and self._relevant(p, it["title"]):
+                        if hits(it["title"], names) and hits(it["title"], kws + list(p.get("extra_keywords", []))) \
+                                and self._relevant(p, it["title"]):
                             self._accept(sk, it, key, found)
                     self.st["seeded"][sk] = True
             # docs: new pages whose path looks token-related
@@ -437,9 +439,9 @@ class Watcher:
             if posts is None:
                 continue
             for it in posts:
-                if not hits(it["text"], kws):
-                    continue
                 for key, p in projects(self.cfg).items():
+                    if not hits(it["text"], kws + list(p.get("extra_keywords", []))):
+                        continue
                     if hits(it["text"], list(p.get("aliases", []))) and self._relevant(p, it["text"]):
                         self._accept(sk, it, key, found)
             self.st["seeded"][sk] = True

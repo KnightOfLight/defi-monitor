@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from . import fmt
+from . import fmt, portfolio
 from .storage import history_span_hours, iso, parse_iso, value_ago
 from .telegram import esc
 
@@ -104,7 +104,7 @@ class AlertEngine:
     def _prices(self, m: dict) -> None:
         P = self.A["price"]
         counters = self.state.setdefault("counters", {})
-        for asset in ASSET_NAMES:
+        for asset in portfolio.assets(self.cfg):
             p = m.get(f"price_{asset}")
             if p is None:
                 continue
@@ -130,7 +130,8 @@ class AlertEngine:
     # --- TVL -----------------------------------------------------------
     def _tvl(self, m: dict, history: list[dict]) -> None:
         T = self.A["tvl"]
-        for proto in PROTO_NAMES:
+        names = portfolio.protocols(self.cfg)
+        for proto in names:
             cur = m.get(f"tvl_{proto}")
             if cur is None:
                 continue
@@ -147,7 +148,7 @@ class AlertEngine:
             current = (self.state.get("alerts", {}).get(key) or {}).get("level")
             if (current == "alarm" and d24 is None) or (current == "warn" and d7 is None and level is None):
                 continue
-            name = PROTO_NAMES[proto]
+            name = names[proto]
             text = (f"TVL {name} = <b>{fmt.money(cur)}</b>\n"
                     f"за 24 год: {fmt.pct(d24, signed=True)} · за 7 днів: {fmt.pct(d7, signed=True)}\n"
                     f"Джерело: DefiLlama ({esc(self.cfg['sources']['defillama']['slugs'].get(proto, proto))})")
@@ -399,7 +400,7 @@ def status_levels(cfg: dict, m: dict, history: list[dict], state: dict, now: dat
         return {"alarm": "🚨 тривога", "warn": "⚠️ увага", "info": "ℹ️", None: "✅ норма"}[level]
 
     P = A["price"]
-    for a in ASSET_NAMES:
+    for a in portfolio.assets(cfg):
         p = m.get(f"price_{a}")
         if p is None:
             out[f"price_{a}"] = "н/д"
@@ -411,7 +412,7 @@ def status_levels(cfg: dict, m: dict, history: list[dict], state: dict, now: dat
             out[f"price_{a}"] += f" ({c}/{P.get('warn_consecutive', 2)} перевірок)"
 
     T = A["tvl"]
-    for proto in PROTO_NAMES:
+    for proto in portfolio.protocols(cfg):
         cur = m.get(f"tvl_{proto}")
         key = f"tvl_{proto}"
         d7 = fmt.change_pct(cur, value_ago(history, key, now, 168, 12))

@@ -203,25 +203,25 @@ class TestAlerts(unittest.TestCase):
 
     def test_price_warn_needs_two_checks_then_recovers(self):
         st = fresh_state(T0 - timedelta(days=30))
-        msgs = self.run_engine(st, base_metrics(price_usdu=0.994), T0)
+        msgs = self.run_engine(st, base_metrics(price_trusd=0.994), T0)
         self.assertEqual(msgs, [])
-        msgs = self.run_engine(st, base_metrics(price_usdu=0.994), T0 + timedelta(minutes=30))
+        msgs = self.run_engine(st, base_metrics(price_trusd=0.994), T0 + timedelta(minutes=30))
         self.assertEqual(len(msgs), 1)
         self.assertIn("УВАГА", msgs[0])
         self.assertIn("2 перевірках", msgs[0])
         # repeat only after 6h
-        msgs = self.run_engine(st, base_metrics(price_usdu=0.994), T0 + timedelta(hours=1))
+        msgs = self.run_engine(st, base_metrics(price_trusd=0.994), T0 + timedelta(hours=1))
         self.assertEqual(msgs, [])
-        msgs = self.run_engine(st, base_metrics(price_usdu=0.994), T0 + timedelta(hours=7))
+        msgs = self.run_engine(st, base_metrics(price_trusd=0.994), T0 + timedelta(hours=7))
         self.assertEqual(len(msgs), 1)
         self.assertIn("повтор", msgs[0])
-        # escalation to alarm (USDu threshold 0.98)
-        msgs = self.run_engine(st, base_metrics(price_usdu=0.975), T0 + timedelta(hours=7, minutes=30))
+        # escalation to alarm (trUSD threshold 0.985)
+        msgs = self.run_engine(st, base_metrics(price_trusd=0.975), T0 + timedelta(hours=7, minutes=30))
         self.assertEqual(len(msgs), 1)
         self.assertIn("ТРИВОГА", msgs[0])
         self.assertIn("ескалація", msgs[0])
         # recovery
-        msgs = self.run_engine(st, base_metrics(price_usdu=0.999), T0 + timedelta(hours=8))
+        msgs = self.run_engine(st, base_metrics(price_trusd=0.999), T0 + timedelta(hours=8))
         self.assertEqual(len(msgs), 1)
         self.assertIn("НОРМА", msgs[0])
 
@@ -520,7 +520,7 @@ SITEMAP_PAGES = """<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/s
 
 class FakeResp:
     def __init__(self, text):
-        self.text, self.content, self.status_code = text, text.encode(), 200
+        self.text, self.content, self.status_code, self.ok = text, text.encode(), 200, True
 
     def raise_for_status(self):
         pass
@@ -756,7 +756,7 @@ class TestTge(unittest.TestCase):
         # digest + clearing
         lines = "\n".join(tge.digest_lines(self.cfg, st, now))
         self.assertIn("Saturn: TGE <b>20.11</b> (через 19 дн.)", lines)
-        self.assertIn("Unitas: TGE відбувся 13.03.2026", lines)
+        self.assertIn("Unitas: Season 2", lines)
         self.assertIn("прибрано", tge.cmd_tge(self.cfg, st, now, "saturn off"))
         self.assertNotIn("saturn", st["tge"]["dates"])
         self.assertIn("TGE / airdrop", commands.dispatch(
@@ -973,12 +973,14 @@ class TestSecurity(unittest.TestCase):
         msgs = security.run_news(cfg, st, T0 + timedelta(minutes=30), sess)
         self.assertEqual(len(msgs), 1)
         self.assertIn("Цифри теж рухаються: <b>ціна USDT (Tether) = $0.9800</b>", msgs[0])
-        self.assertIn("Стосується Unitas", msgs[0])
+        self.assertIn("Стосується Fluid", msgs[0])
+        self.assertNotIn("Unitas", msgs[0])                                      # позиції немає з 31.10
         # кастодіан без цифр — одразу
-        feed["v"] = rss([("Ceffu hacked: $40M drained from hot wallets", "c", T0 + timedelta(minutes=40))])
+        feed["v"] = rss([("Fireblocks hacked: $40M drained from MPC wallets", "c", T0 + timedelta(minutes=40))])
         msgs = security.run_news(cfg, st, T0 + timedelta(minutes=45), sess)
         self.assertEqual(len(msgs), 1)
-        self.assertIn("Ceffu", msgs[0])
+        self.assertIn("Fireblocks", msgs[0])
+        self.assertIn("Стосується Saturn", msgs[0])
         self.assertNotIn("Цифри", msgs[0])
         # алерт по ціні стейбла сам підтягує свіжі новини про нього
         mm = security.Measured(cfg, st, T0 + timedelta(hours=1), FakeSession({}), {})
@@ -1034,6 +1036,109 @@ class TestSecurity(unittest.TestCase):
         cs.get("https://t.me/s/a", headers={"a": 1})
         cs.get("https://t.me/s/a", headers={"b": 2})
         self.assertEqual(n["c"], 1)
+
+
+# --------------------------------------------------------------------------
+class TestPortfolioV13(unittest.TestCase):
+    """31.10.2026: Unitas — лише нагороди Season 2; безпека — Saturn, Tori, infiniFi, Fluid, Mantle."""
+
+    def test_portfolio_from_config(self):
+        from bot import portfolio
+        cfg = load_config()
+        self.assertEqual(list(portfolio.assets(cfg)), ["usdat", "iusd", "trusd"])
+        self.assertEqual(list(portfolio.protocols(cfg)), ["saturn", "infinifi", "tori", "fluid", "mantle"])
+        self.assertEqual(portfolio.points(cfg), ["saturn_points", "infinifi_points", "tori_points"])
+        self.assertNotIn("unitas", portfolio.log_example(cfg))
+        self.assertEqual(list(security.projects(cfg)), ["tori", "saturn", "infinifi", "fluid", "mantle"])
+        self.assertIn("unitas", cfg["tge"]["projects"])
+        self.assertNotIn("fluid", cfg["tge"]["projects"])
+        # /status і дайджест не показують USDu / Unitas
+        tmp = tempfile.mkdtemp()
+        try:
+            for k in ("journal", "history", "state"):
+                cfg["files"][k] = os.path.join(tmp, k)
+            tg = Telegram("t", "1", dry_run=True)
+            c = commands.Ctx(cfg=cfg, state=fresh_state(T0), tg=tg, now=datetime(2026, 10, 30, 8, 0, tzinfo=UTC))
+            c.metrics, c.errors, c.history = base_metrics(tvl_fluid=1.2e9, tvl_mantle=4.1e8), {}, []
+            status = commands.status_text(c)
+            self.assertNotIn("USDu", status)
+            self.assertNotIn("Unitas", status)
+            self.assertIn("Fluid: <b>$1.20 млрд</b>", status)
+            self.assertIn("Mantle: <b>$410.00 млн</b>", status)
+            weekly.send_digest(c, "2026-10-30")
+            self.assertNotIn("app.unitas.so", tg.sent[-1])
+            self.assertIn("/log saturn 123456 infinifi 4567 tori 2500", tg.sent[-1])
+            self.assertIn("Fluid", tg.sent[-1])
+            self.assertNotIn("USDu", commands.thresholds_text(cfg))
+        finally:
+            shutil.rmtree(tmp)
+
+    def test_defillama_list_and_chain(self):
+        sess = FakeSession({"https://api.llama.fi/tvl/fluid-lending": "1000000000",
+                            "https://api.llama.fi/tvl/fluid-dex": "500000000",
+                            "https://api.llama.fi/v2/chains": json.dumps([{"name": "Ethereum", "tvl": 6e10},
+                                                                         {"name": "Mantle", "tvl": 4.1e8}])})
+        self.assertEqual(sources.defillama_tvl("https://api.llama.fi", ["fluid-lending", "fluid-dex"], sess), 1.5e9)
+        self.assertEqual(sources.defillama_tvl("https://api.llama.fi", "chain:Mantle", sess), 4.1e8)
+        with self.assertRaises(RuntimeError):
+            sources.defillama_tvl("https://api.llama.fi", "chain:Nowhere", sess)
+
+    def test_rate_flags_infinite_proxy(self):
+        cfg = load_config()
+        fusdc, pauser, liq = "0x" + "f1" * 20, "0x" + "29" * 20, "0x" + "52" * 20
+        cfg["security"]["projects"] = {"fluid": {"name": "Fluid", "aliases": ["Fluid DEX"], "deps": {}, "contracts": [
+            {"label": "fUSDC", "address": fusdc, "rate": {"getter": "convertToAssets(uint256)", "unit": 6}},
+            {"label": "Liquidity", "address": liq, "sig_impls": {"operate": "0xad967e15"}},
+            {"label": "Pauser", "address": pauser, "flags": ["isStakingPaused()"]}]}}
+        v = {"rate": 1_081_234, "impl": "0x" + "aa" * 20, "flag": 0}
+
+        def chain():
+            return FakeChain({
+                (fusdc, "convertToAssets(uint256)" + format(10 ** 6, "064x")): word(v["rate"]),
+                (liq, "getSigsImplementation(bytes4)" + "ad967e15".ljust(64, "0")): addr_word(v["impl"]),
+                (pauser, "isStakingPaused()"): word(v["flag"]),
+            })
+
+        def run(now):
+            st_ = st
+            eng = alerts.AlertEngine(cfg, st_, now)
+            o = security.Onchain(cfg, st_, now, {"ethereum": chain()})
+            o.run()
+            security.apply(eng, o.findings, st_)
+            return eng.messages
+        st = fresh_state(T0 - timedelta(days=30))
+        self.assertEqual(run(T0), [])
+        rec = {r["label"]: r for r in st["security"]["contracts"].values()}
+        self.assertEqual(rec["Fluid · fUSDC"]["kinds"], ["rate"])
+        self.assertEqual(rec["Fluid · Liquidity"]["kinds"], ["sigimpl:operate"])
+        self.assertEqual(rec["Fluid · Pauser"]["kinds"], ["flag:isStakingPaused()"])
+        v["rate"] = 1_081_300                                       # курс росте — тиша
+        self.assertEqual(run(T0 + timedelta(minutes=15)), [])
+        v.update(rate=1_050_000, impl="0x" + "bb" * 20, flag=1)
+        msgs = run(T0 + timedelta(minutes=30))
+        self.assertTrue(any("курс частки <b>впав</b>" in x for x in msgs))
+        self.assertTrue(any("реалізацію функції operate()" in x for x in msgs))
+        self.assertTrue(any("isStakingPaused</b> = true" in x for x in msgs))
+        v["flag"] = 0
+        self.assertTrue(any("isStakingPaused знову false" in x for x in run(T0 + timedelta(minutes=45))))
+
+    def test_fluid_mantle_news_and_unitas_season2(self):
+        cfg = load_config()
+        T = cfg["security"]
+        st = fresh_state(T0)
+        targets = security.news_targets(cfg, st)
+        m = lambda title: [t["key"] for t in security.match({"title": title, "text": title}, targets, T, True)]
+        self.assertEqual(m("【Fluid 遭黑客攻击，损失约 500 万美元】"), ["own:fluid"])
+        self.assertEqual(m("Fluid DEX exploited for $5M"), ["own:fluid"])
+        self.assertNotIn("own:fluid", m("Situation remains fluid after Bybit hack"))
+        self.assertEqual(m("Mantle Network bridge exploited, attacker drains $20M"), ["own:mantle"])
+        self.assertEqual(m("Ex-CEO takes up the mantle after exchange hack"), [])
+        self.assertNotIn("own:unitas", [t["key"] for t in targets])
+        # TGE: Unitas Season 2 — свої ключові слова
+        p = cfg["tge"]["projects"]["unitas"]
+        kws = cfg["tge"]["keywords"] + p["extra_keywords"]
+        title = "Unitas opens Season 2 rewards distribution for USDu holders"
+        self.assertTrue(tge.hits(title, p["aliases"]) and tge.hits(title, kws))
 
 
 if __name__ == "__main__":

@@ -27,6 +27,9 @@ from .telegram import Telegram
 from .weekly import run_weekly
 
 
+UPGRADE_NOTE_1_3 = ("новий набір проєктів: безпека — Saturn, Tori, infiniFi, <b>Fluid</b> і <b>Mantle</b> "
+                    "(ядро Fluid Liquidity, курси fUSDC/fUSDT; міст і портал Mantle, курс і пауза mETH); TGE — Saturn, "
+                    "Tori, infiniFi; Unitas — лише розподіл нагород Season 2 (ціну USDu, TVL і поінти Unitas прибрано).")
 UPGRADE_NOTE_1_2 = ("стеження за безпекою: on-chain нагляд за контрактами ваших протоколів (оновлення proxy, "
                     "пауза, різкий мінт), ціни стейблкоїнів і TVL протоколів, від яких вони залежать, новини про "
                     "хаки зі збігом назв. Команди <code>/deps</code> і <code>/security</code>.")
@@ -96,8 +99,10 @@ def monitor_pass(ctx: Ctx, process_commands: bool = True) -> None:
     elif state.get("announced_version") != __version__:
         for obsolete in ("curve_share", "curve_liquidity"):     # алерти пулу Curve USDat прибрані у v1.1
             state.get("alerts", {}).pop(obsolete, None)
-        note = UPGRADE_NOTE_1_2 if str(state.get("announced_version") or "").startswith("1.1") \
-            else UPGRADE_NOTE + "\nТакож " + UPGRADE_NOTE_1_2
+        prev = str(state.get("announced_version") or "")
+        note = (UPGRADE_NOTE_1_3 if prev.startswith("1.2") else
+                UPGRADE_NOTE_1_2 + "\nТакож " + UPGRADE_NOTE_1_3 if prev.startswith("1.1") else
+                UPGRADE_NOTE + "\nТакож " + UPGRADE_NOTE_1_2 + "\nІ " + UPGRADE_NOTE_1_3)
         ctx.tg.send(f"🔄 Бот оновлено до v{__version__}: {note}\n\n" + status_text(ctx))
     state["announced_version"] = __version__
     for msg in messages:
@@ -181,17 +186,21 @@ def cmd_selftest(args) -> int:
     dl = src["defillama"]
     for key, slug in dl["slugs"].items():
         def _dl(slug=slug):
-            info = sources.defillama_protocol_info(dl["base_url"], slug)
             tvl = sources.defillama_tvl(dl["base_url"], slug)
-            chains = {k: round(v / 1e6, 2) for k, v in info["chains"].items() if isinstance(v, (int, float))}
-            return f"{info['name']} TVL ${tvl / 1e6:.2f}M, по мережах (M$): {chains}"
+            if isinstance(slug, str) and not slug.startswith("chain:"):
+                info = sources.defillama_protocol_info(dl["base_url"], slug)
+                chains = {k: round(v / 1e6, 2) for k, v in info["chains"].items() if isinstance(v, (int, float))}
+                return f"{info['name']} TVL ${tvl / 1e6:.2f}M, по мережах (M$): {chains}"
+            return f"TVL ${tvl / 1e6:.2f}M"
         check(f"DefiLlama {key} (slug={slug})", _dl)
 
     eth = Chain(src["rpc"]["ethereum"])
     bsc = Chain(src["rpc"]["bsc"])
-    E, B = src["ethereum"], src["bsc"]
+    E, B = src["ethereum"], src.get("bsc") or {}
+    uses_bsc = bool(B.get("pancake_usdu_pool")) or any(c.get("chain") == "bsc" for c in security.contract_list(cfg))
     check("Ethereum RPC", lambda: f"блок {eth.block_number()} через {mask_url(eth.urls[0])}")
-    check("BSC RPC", lambda: f"блок {bsc.block_number()} через {mask_url(bsc.urls[0])}")
+    if uses_bsc:
+        check("BSC RPC", lambda: f"блок {bsc.block_number()} через {mask_url(bsc.urls[0])}")
 
     def _curve():
         c = sources.curve_pool_state(eth, E["curve_usdat_pool"], E["usdat_token"], src["probe_amounts"]["usdat"])
@@ -206,12 +215,14 @@ def cmd_selftest(args) -> int:
     def _pcs():
         p = sources.v3_pool_state(bsc, B["pancake_usdu_pool"], B["usdu_token"])
         return f"{'/'.join(p['symbols'])}: ціна USDu {p['price']:.5f}, ліквідність ${p['liquidity_usd']:,.0f}"
-    check("PancakeSwap V3 USDu/USDT", _pcs)
+    if B.get("pancake_usdu_pool"):
+        check("PancakeSwap V3 USDu/USDT", _pcs)
 
     def _gt():
         g = sources.geckoterminal_pool(src["geckoterminal"]["base_url"], "bsc", B["pancake_usdu_pool"], B["usdu_token"])
         return f"{g['name']}: ціна {g['price']:.5f}, reserve ${g['liquidity_usd']:,.0f} (резервне джерело)"
-    check("GeckoTerminal USDu", _gt)
+    if B.get("pancake_usdu_pool"):
+        check("GeckoTerminal USDu", _gt)
 
     def _inf():
         i = sources.infinifi_state(eth, E["infinifi_gateway"], int(E.get("liusd_bucket_weeks", 13)))
@@ -318,9 +329,9 @@ def cmd_selftest(args) -> int:
                 ch = chains[c.get("chain", "ethereum")]
                 addr = c.get("address") or ch.addr(c["resolve"]["from"], c["resolve"]["getter"])
                 got = {}
-                for k in list(security.ADDR_PROBES) + ["paused"] + (["supply"] if c.get("supply") else []):
+                for k in security.all_kinds(c):
                     try:
-                        v = security.probe(ch, addr, k)
+                        v = security.probe(ch, addr, k, c)
                     except Exception:
                         continue
                     if v is not None:

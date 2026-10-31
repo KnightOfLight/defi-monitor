@@ -147,6 +147,7 @@ def news_targets(cfg: dict, state: dict) -> list[dict]:
     out = []
     for pk, p in projects(cfg).items():
         out.append({"key": f"own:{pk}", "own": True, "name": p.get("name", pk), "aliases": p.get("aliases", []),
+                    "cjk_aliases": p.get("cjk_aliases", []),
                     "strict": False, "exclude": p.get("exclude", []), "project": pk})
     used = set()
     for p in projects(cfg).values():
@@ -164,8 +165,23 @@ def news_targets(cfg: dict, state: dict) -> list[dict]:
 # --------------------------------------------------------------------------
 # 1. on-chain: own contracts
 # --------------------------------------------------------------------------
-def probe(chain: Chain, addr: str, kind: str):
-    """Value of one probe, or raises. A revert / empty answer means «not applicable» for this contract."""
+def probe(chain: Chain, addr: str, kind: str, c: dict | None = None):
+    """Value of one probe, or raises. A revert / empty answer means «not applicable» for this contract.
+    Besides the generic ones (proxy slots, owner, minter, paused, supply) a contract can ask for:
+      rate: {getter: "convertToAssets(uint256)", unit: 6} — share price; any drop is a loss;
+      flags: ["isStakingPaused()", …] — bool getters, true = paused;
+      sig_impls: {operate: "0xad967e15"} — Fluid InfiniteProxy: implementation behind a function."""
+    c = c or {}
+    if kind == "rate":
+        r = c["rate"]
+        unit = 10 ** int(r.get("unit", 18))
+        return chain.uint(addr, r["getter"], format(unit, "064x")) / unit
+    if kind.startswith("flag:"):
+        return bool(chain.uint(addr, kind[5:]))
+    if kind.startswith("sigimpl:"):
+        sel = (c.get("sig_impls") or {})[kind[8:]].lower().replace("0x", "")
+        a = chain.addr(addr, "getSigsImplementation(bytes4)", sel.ljust(64, "0"))
+        return None if is_zero(a) else a.lower()
     if kind in SLOTS:
         v = chain.storage(addr, SLOTS[kind])
         return ("0x" + format(v, "064x")[-40:]).lower() if v else None
@@ -177,6 +193,14 @@ def probe(chain: Chain, addr: str, kind: str):
     if kind == "supply":
         return chain.uint(addr, "totalSupply()") / 10 ** chain.decimals(addr)
     raise ValueError(kind)
+
+
+def all_kinds(c: dict) -> list[str]:
+    k = list(ADDR_PROBES) + ["paused"] + (["supply"] if c.get("supply") else [])
+    k += ["rate"] if c.get("rate") else []
+    k += [f"flag:{f}" for f in c.get("flags") or []]
+    k += [f"sigimpl:{n}" for n in (c.get("sig_impls") or {})]
+    return k
 
 
 def contract_list(cfg: dict) -> list[dict]:
@@ -235,18 +259,17 @@ class Onchain:
             first = rec is None
             rec = rec or {"label": label, "kinds": [], "values": {}, "supply_hist": []}
             rec["label"], rec["project"] = label, c["project"]
-            kinds = (list(ADDR_PROBES) + ["paused"] + (["supply"] if c.get("supply") else [])) \
-                if (first or full) else rec["kinds"]
+            kinds = all_kinds(c) if (first or full) else rec["kinds"]
             found, values, failed = [], {}, None
             for k in kinds:
                 try:
-                    v = probe(chain, addr, k)
+                    v = probe(chain, addr, k, c)
                 except RpcUnavailable as e:
                     failed = str(e)
                     break
                 except Exception:
                     continue                      # revert → не застосовно до цього контракту
-                if v is None and k in ADDR_PROBES:
+                if v is None and (k in ADDR_PROBES or k.startswith("sigimpl:")):
                     continue
                 found.append(k)
                 values[k] = v
@@ -271,10 +294,11 @@ class Onchain:
         note = f"\n{esc(c['note'])}" if c.get("note") else ""
         link = f"https://{'bscscan.com' if c.get('chain') == 'bsc' else 'etherscan.io'}/address/{addr}"
         # address-like probes: any change is an event
-        for k in ADDR_PROBES:
+        for k in list(ADDR_PROBES) + [x for x in values if x.startswith("sigimpl:")]:
             if k in values and k in old and old[k] and values[k] != old[k]:
+                what = PROBE_LABEL.get(k) or f"реалізацію функції {k[8:]}() (InfiniteProxy)"
                 self.findings.append({"type": "event", "level": "alarm", "text":
-                    f"🛡 <b>{esc(label)}</b>: змінено {PROBE_LABEL[k]}\n"
+                    f"🛡 <b>{esc(label)}</b>: змінено {what}\n"
                     f"<code>{esc(short(old[k]))}</code> → <code>{esc(short(values[k]))}</code>\n"
                     f"Планові оновлення теж так виглядають, але тихе оновлення — типовий шлях, яким викрадений "
                     f"ключ адміна перетворюється на злам. Перевірте X/Discord проєкту; поки немає пояснення — "
@@ -288,6 +312,21 @@ class Onchain:
                                           f"Протоколи ставлять паузу, коли щось іде не так: злам, помилка оракула, "
                                           f"атака на пул. Шукайте пояснення в каналах проєкту.{note}\n{link}",
                                   "recovery": f"🛡 {esc(label)}: паузу знято."})
+        for k in [x for x in values if x.startswith("flag:")]:
+            flag = k[5:].replace("()", "")
+            self.findings.append({"type": "cond", "id": f"sec_flag_{c['project']}_{c['label']}_{flag}",
+                                  "level": "alarm" if values[k] else None,
+                                  "text": f"🛡 <b>{esc(label)}</b>: увімкнено <b>{esc(flag)}</b> = true — частину "
+                                          f"функцій протоколу зупинено. Так роблять при зламі чи збої; шукайте "
+                                          f"пояснення в каналах проєкту.{note}\n{link}",
+                                  "recovery": f"🛡 {esc(label)}: {esc(flag)} знову false."})
+        if "rate" in values and old.get("rate") and not first:
+            tol = float((self.T.get("rate") or {}).get("drop_tolerance", 1e-6))
+            if values["rate"] < old["rate"] * (1 - tol):
+                self.findings.append({"type": "event", "level": "alarm", "text":
+                    f"🛡 <b>{esc(label)}</b>: курс частки <b>впав</b> {fmt.rate(old['rate'])} → "
+                    f"<b>{fmt.rate(values['rate'])}</b> ({fmt.pct(fmt.change_pct(values['rate'], old['rate']), 4, signed=True)})\n"
+                    f"Такий курс у нормі лише росте; падіння — списаний збиток (злам, поганий борг, slashing).{note}\n{link}"})
         # supply: jump per run (event), drop over 24 h (condition)
         if "supply" in values:
             cur = values["supply"]
@@ -491,6 +530,7 @@ def _strict_hit(text: str, alias: str, strong: list[str]) -> bool:
     return False
 
 
+_CJK = re.compile(r"[\u3400-\u9fff]")
 _SENT = re.compile(r"[。！？!?；;\n]+|(?<=[a-z0-9\)])\.\s+")
 
 
@@ -513,7 +553,10 @@ def _hit_in(s: str, t: dict, kws: list[str], strong: list[str]) -> bool:
         return False
     if t["strict"]:
         return any(_strict_hit(s, a, strong + extra) for a in t["aliases"])
-    return bool(tge.hits(s, t["aliases"]))
+    aliases = list(t["aliases"])
+    if t.get("cjk_aliases") and _CJK.search(s):    # «Fluid 遭攻击»: голе «Fluid» — лише в китайському тексті
+        aliases += list(t["cjk_aliases"])
+    return bool(tge.hits(s, aliases))
 
 
 def match(item: dict, targets: list[dict], T: dict, scope_full: bool) -> list[dict]:
@@ -803,6 +846,13 @@ def security_text(cfg: dict, state: dict, now: datetime) -> str:
             bits.append(f"емісія {fmt.num(v['supply'])}")
         if "owner" in v:
             bits.append(f"owner {short(v['owner'])}")
+        if "rate" in v:
+            bits.append(f"курс {fmt.rate(v['rate'])}")
+        for k in (x for x in v if x.startswith("flag:")):
+            bits.append(f"{k[5:].replace('()', '')}: {'⏸ ТАК' if v[k] else 'ні'}")
+        n_impl = sum(1 for x in v if x.startswith("sigimpl:"))
+        if n_impl:
+            bits.append(f"реалізацій під наглядом: {n_impl}")
         lines.append(f"• {esc(r.get('label', key))}: {esc(', '.join(bits) or 'без proxy/паузи')}")
     if st.get("prices"):
         lines.append("")

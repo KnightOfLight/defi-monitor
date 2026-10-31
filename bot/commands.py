@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from . import fmt, security, tge
+from . import fmt, portfolio, security, tge
 from .alerts import status_levels
 from .metrics import collect
 from .storage import (POINTS_COLUMNS, journal_row_from_metrics, last_row_with_points, load_history,
@@ -22,13 +22,12 @@ POINT_ALIASES = {
     "tori": "tori_points", "cores": "tori_points", "core": "tori_points", "trusd": "tori_points",
     "strusd": "tori_points",
 }
-POINT_LABELS = {"saturn_points": "Saturn", "unitas_points": "Unitas", "infinifi_points": "InfiniFi",
-                "tori_points": "Tori (Cores)"}
-LOG_EXAMPLE = "/log saturn 123456 unitas 7890 infinifi 4567 tori 2500"
+POINT_LABELS = {c: label for c, label, _ in portfolio.POINTS.values()}
+LOG_EXAMPLE = "/log saturn 123456 infinifi 4567 tori 2500"   # довідка; у дайджесті — portfolio.log_example(cfg)
 
 HELP = """<b>Команди бота</b>
 /status — поточні значення всіх метрик і рівень відносно порогів
-/log saturn 123456 unitas 7890 infinifi 4567 tori 2500 — записати поінти (можна будь-якого дня; пропущені протоколи можна не вказувати; tori = Cores)
+/log saturn 123456 infinifi 4567 tori 2500 — записати поінти (можна будь-якого дня; пропущені протоколи можна не вказувати; tori = Cores)
 /note текст — дописати примітку до останнього рядка журналу
 /export — надіслати журнал CSV + підсумок за тиждень і місяць
 /thresholds — показати пороги алертів
@@ -135,18 +134,18 @@ def status_text(ctx: Ctx) -> str:
     local = ctx.local_now().strftime("%d.%m.%Y %H:%M")
     lines = [f"📊 <b>Статус</b> · {local} (Київ)", ""]
     lines.append("<b>Ціни (найглибший пул)</b>")
-    lines.append(f"USDat: <b>{fmt.price(m['price_usdat'])}</b> — {lv['price_usdat']}")
-    lines.append(f"USDu: <b>{fmt.price(m['price_usdu'])}</b> — {lv['price_usdu']} "
-                 f"(PancakeSwap ~{fmt.money(m.get('usdu_pool_liquidity'), 1)})")
-    lines.append(f"iUSD: <b>{fmt.price(m['price_iusd'])}</b> — {lv['price_iusd']} "
-                 f"(пул ~{fmt.money(m.get('curve_iusd_liquidity'), 0)}; курс погашення в протоколі "
-                 f"{fmt.price(m.get('iusd_redeem_rate'))})")
-    lines.append(f"trUSD: <b>{fmt.price(m['price_trusd'])}</b> — {lv['price_trusd']} "
-                 f"(Curve frxUSD/trUSD ~{fmt.money(m.get('trusd_pool_liquidity'), 1)})")
+    extra = {
+        "usdu": f" (PancakeSwap ~{fmt.money(m.get('usdu_pool_liquidity'), 1)})",
+        "iusd": f" (пул ~{fmt.money(m.get('curve_iusd_liquidity'), 0)}; курс погашення в протоколі "
+                f"{fmt.price(m.get('iusd_redeem_rate'))})",
+        "trusd": f" (Curve frxUSD/trUSD ~{fmt.money(m.get('trusd_pool_liquidity'), 1)})",
+    }
+    for a, name in portfolio.assets(ctx.cfg).items():
+        lines.append(f"{name}: <b>{fmt.price(m.get(f'price_{a}'))}</b> — {lv[f'price_{a}']}{extra.get(a, '')}")
     lines.append("")
     lines.append("<b>TVL (DefiLlama)</b>")
-    for p, name in (("saturn", "Saturn"), ("unitas", "Unitas"), ("infinifi", "InfiniFi"), ("tori", "Tori")):
-        lines.append(f"{name}: <b>{fmt.money(m[f'tvl_{p}'])}</b> — {lv[f'tvl_{p}']}")
+    for p, name in portfolio.protocols(ctx.cfg).items():
+        lines.append(f"{name}: <b>{fmt.money(m.get(f'tvl_{p}'))}</b> — {lv[f'tvl_{p}']}")
     lines.append("")
     lines += pendle_status_lines(ctx.cfg, m, lv, ctx.state, ctx.now)
     lines.append("")
@@ -232,8 +231,7 @@ def thresholds_text(cfg: dict) -> str:
     return "\n".join([
         "<b>Пороги (config.yaml)</b>",
         f"Ціни: увага &lt; {P['warn_below']} на {P.get('warn_consecutive', 2)} перевірках поспіль; "
-        f"тривога одразу: USDat &lt; {ab.get('usdat')}, USDu &lt; {ab.get('usdu')}, iUSD &lt; {ab.get('iusd')}, "
-        f"trUSD &lt; {ab.get('trusd')}",
+        "тривога одразу: " + ", ".join(f"{n} &lt; {ab.get(a, ab.get('usdat'))}" for a, n in portfolio.assets(cfg).items()),
         f"TVL: увага −{T['warn_drop_7d_pct']}% за 7 дн; тривога −{T['alarm_drop_24h_pct']}% за 24 год; "
         f"інфо Saturn &gt; {fmt.money(T['saturn_high_usd'], 0)}",
         f"Pendle trUSD: PT дешевшає за 24 год на {PP.get('pt_drop_24h_warn_pct', 0.5)}% → увага, "
@@ -292,7 +290,7 @@ def parse_points(arg: str) -> dict[str, float]:
 def cmd_log(ctx: Ctx, arg: str) -> str:
     pts = parse_points(arg)
     if not pts:
-        return (f"Формат: <code>{LOG_EXAMPLE}</code>\n"
+        return (f"Формат: <code>{portfolio.log_example(ctx.cfg)}</code>\n"
                 "Можна вказати лише частину протоколів.")
     path = ctx.cfg["files"]["journal"]
     rows = load_journal(path)
@@ -322,14 +320,14 @@ def cmd_log(ctx: Ctx, arg: str) -> str:
     ctx.state.setdefault("weekly", {})["pending_points_date"] = None
 
     lines = [f"✅ Поінти записано в рядок <b>{esc(row['date'])}</b>:"]
-    for k in POINTS_COLUMNS:
+    for k in POINTS_COLUMNS:  # усі, що ввели (навіть неактивні), — щоб нічого не загубилось
         if k in pts:
             delta = ""
             if prev and to_float(prev.get(k)) is not None:
                 d = pts[k] - to_float(prev[k])
                 delta = f" ({'+' if d >= 0 else ''}{fmt.num(d)} з {esc(prev['date'])})"
             lines.append(f"• {POINT_LABELS[k]}: <b>{fmt.num(pts[k])}</b>{delta}")
-    missing = [POINT_LABELS[k] for k in POINTS_COLUMNS if not row.get(k)]
+    missing = [POINT_LABELS[k] for k in portfolio.points(ctx.cfg) if not row.get(k)]
     if missing:
         lines.append(f"Ще не вказано: {', '.join(missing)} — можна дописати тією ж командою.")
     return "\n".join(lines)
@@ -394,18 +392,9 @@ def cmd_export(ctx: Ctx) -> str:
     lines = [f"📤 Журнал: {len(rows)} рядків, {esc(rows[0]['date'])} → {esc(latest['date'])}",
              f"Порівняння: тиждень vs {esc(week['date']) if week else '—'}, місяць vs {esc(month['date']) if month else '—'}",
              "",
-             line("Поінти Saturn", "saturn_points", "num"),
-             line("Поінти Unitas", "unitas_points", "num"),
-             line("Поінти InfiniFi", "infinifi_points", "num"),
-             line("Поінти Tori (Cores)", "tori_points", "num"),
-             line("TVL Saturn", "tvl_saturn", "money"),
-             line("TVL Unitas", "tvl_unitas", "money"),
-             line("TVL InfiniFi", "tvl_infinifi", "money"),
-             line("TVL Tori", "tvl_tori", "money"),
-             line("USDat", "price_usdat", "price"),
-             line("USDu", "price_usdu", "price"),
-             line("iUSD", "price_iusd", "price"),
-             line("trUSD", "price_trusd", "price"),
+             *[line(f"Поінти {POINT_LABELS[c]}", c, "num") for c in portfolio.points(ctx.cfg)],
+             *[line(f"TVL {n}", f"tvl_{p}", "money") for p, n in portfolio.protocols(ctx.cfg).items()],
+             *[line(n, f"price_{a}", "price") for a, n in portfolio.assets(ctx.cfg).items()],
              line("Rate liUSD-13w", "liusd13w_rate", "rate"),
              line("Резерв InfiniFi", "infinifi_liquid_reserve", "money"),
              line("Курс strUSD", "strusd_rate", "rate"),

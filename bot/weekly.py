@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from . import fmt, security, tge
-from .commands import LOG_EXAMPLE, POINT_LABELS, Ctx
+from . import fmt, portfolio, security, tge
+from .commands import POINT_LABELS, Ctx
 from .storage import (POINTS_COLUMNS, journal_row_from_metrics, last_row_with_points, load_journal, save_journal,
                       to_float, value_ago)
 from .telegram import esc
@@ -45,7 +45,7 @@ def _still_pending(ctx: Ctx, date_str: str) -> bool:
     rows = load_journal(ctx.cfg["files"]["journal"])
     for r in reversed(rows):
         if r["date"] == date_str:
-            return not any(r.get(c) for c in POINTS_COLUMNS)
+            return not any(r.get(c) for c in portfolio.points(ctx.cfg))
     return False
 
 
@@ -82,14 +82,14 @@ def send_digest(ctx: Ctx, today: str) -> None:
     local = ctx.local_now().strftime("%d.%m.%Y")
     lines = [f"📅 <b>Тижневий дайджест</b> · {local}", ""]
     lines.append("<b>TVL (зміна за тиждень)</b>")
-    for p, name in (("saturn", "Saturn"), ("unitas", "Unitas"), ("infinifi", "InfiniFi"), ("tori", "Tori")):
+    for p, name in portfolio.protocols(ctx.cfg).items():
         d = wk(f"tvl_{p}")
-        lines.append(f"{name}: <b>{fmt.money(m[f'tvl_{p}'])}</b> {fmt.arrow(d)} {fmt.pct(d, signed=True)}")
+        lines.append(f"{name}: <b>{fmt.money(m.get(f'tvl_{p}'))}</b> {fmt.arrow(d)} {fmt.pct(d, signed=True)}")
     lines.append("")
     lines.append("<b>Ціни</b>")
-    for a, name in (("usdat", "USDat"), ("usdu", "USDu"), ("iusd", "iUSD"), ("trusd", "trUSD")):
+    for a, name in portfolio.assets(ctx.cfg).items():
         d = wk(f"price_{a}")
-        lines.append(f"{name}: <b>{fmt.price(m[f'price_{a}'])}</b> {fmt.arrow(d)} {fmt.pct(d, 2, signed=True)}")
+        lines.append(f"{name}: <b>{fmt.price(m.get(f'price_{a}'))}</b> {fmt.arrow(d)} {fmt.pct(d, 2, signed=True)}")
     lines.append("")
     d = wk("liusd13w_rate")
     lines.append(f"Rate liUSD-13w: <b>{fmt.rate(m['liusd13w_rate'])}</b> {fmt.arrow(d)} {fmt.pct(d, 3, signed=True)}")
@@ -119,7 +119,7 @@ def send_digest(ctx: Ctx, today: str) -> None:
     if last:
         idx = rows.index(last)
         before = last_row_with_points(rows, before_index=idx)
-        for k in POINTS_COLUMNS:
+        for k in portfolio.points(ctx.cfg):
             cur, ref = to_float(last.get(k)), to_float(before.get(k)) if before else None
             delta = f" ({'+' if cur - ref >= 0 else ''}{fmt.num(cur - ref)} з {esc(before['date'])})" \
                 if cur is not None and ref is not None else ""
@@ -128,9 +128,8 @@ def send_digest(ctx: Ctx, today: str) -> None:
     else:
         lines.append("ще немає записів")
     lines.append("")
-    lines.append("✍️ Запишіть сьогоднішні поінти (app.saturn.credit → Points, app.unitas.so → Points, "
-                 "app.infinifi.xyz → Points, Cores — app.tori.finance):")
-    lines.append(f"<code>{LOG_EXAMPLE}</code>")
+    lines.append(f"✍️ Запишіть сьогоднішні поінти ({portfolio.points_where(ctx.cfg)}):")
+    lines.append(f"<code>{portfolio.log_example(ctx.cfg)}</code>")
     lines.append("Відповідь допишеться в рядок журналу за сьогодні. Якщо не відповісте — нагадаю в суботу.")
     if ctx.errors:
         lines.append("")
@@ -141,5 +140,5 @@ def send_digest(ctx: Ctx, today: str) -> None:
 def send_reminder(ctx: Ctx, pending_date: str) -> None:
     ctx.tg.send(
         f"🔔 <b>Нагадування</b>: поінти за {esc(pending_date)} ще не записані.\n"
-        f"Відповідайте: <code>{LOG_EXAMPLE}</code>"
+        f"Відповідайте: <code>{portfolio.log_example(ctx.cfg)}</code>"
     )

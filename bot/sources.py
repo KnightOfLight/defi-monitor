@@ -18,9 +18,20 @@ HTTP_TIMEOUT = 20
 # --------------------------------------------------------------------------
 # DefiLlama
 # --------------------------------------------------------------------------
-def defillama_tvl(base_url: str, slug: str, session: requests.Session | None = None) -> float:
-    """Current TVL in USD. Uses the tiny /tvl/{slug} endpoint, falls back to /protocol/{slug}."""
+def defillama_tvl(base_url: str, slug, session: requests.Session | None = None) -> float:
+    """Current TVL in USD. Uses the tiny /tvl/{slug} endpoint, falls back to /protocol/{slug}.
+    `slug` may be a list (summed: Fluid = fluid-lending + fluid-dex) or "chain:<Name>" (a whole network)."""
     s = session or requests.Session()
+    if isinstance(slug, (list, tuple)):
+        return sum(defillama_tvl(base_url, x, s) for x in slug)
+    if str(slug).startswith("chain:"):
+        name = slug.split(":", 1)[1].strip().lower()
+        r = s.get(f"{base_url}/v2/chains", headers=UA, timeout=HTTP_TIMEOUT)
+        r.raise_for_status()
+        for c in r.json():
+            if str(c.get("name", "")).lower() == name or str(c.get("gecko_id") or "").lower() == name:
+                return float(c["tvl"])
+        raise RuntimeError(f"DefiLlama: мережу '{name}' не знайдено")
     r = s.get(f"{base_url}/tvl/{slug}", headers=UA, timeout=HTTP_TIMEOUT)
     if r.ok:
         try:

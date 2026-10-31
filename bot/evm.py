@@ -54,6 +54,12 @@ SEL = {
     "minter()": "0x07546172",
     "getFarms()": "0x9dc4ac8a",
     "assetToken()": "0x1083f761",
+    # Fluid InfiniteProxy: which implementation serves a function selector
+    "getSigsImplementation(bytes4)": "0xa5fcc8bc",
+    # Mantle LSP (mETH): exchange rate and pause flags (github.com/mantle-lsp/contracts)
+    "mETHToETH(uint256)": "0x5890c11c",
+    "isStakingPaused()": "0x1ea7ca89",
+    "isUnstakeRequestsAndClaimsPaused()": "0x8b61391a",
 }
 ZERO_ADDR = "0x" + "0" * 40
 

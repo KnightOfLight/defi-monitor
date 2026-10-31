@@ -11,7 +11,7 @@ from .evm import Chain
 
 # Flat metric keys stored in history.csv (order matters for the CSV header).
 METRIC_KEYS = [
-    "tvl_saturn", "tvl_unitas", "tvl_infinifi", "tvl_tori",
+    "tvl_saturn", "tvl_unitas", "tvl_infinifi", "tvl_tori", "tvl_fluid", "tvl_mantle",
     "price_usdat", "price_usdu", "price_iusd", "price_trusd",
     "liusd13w_rate",
     "infinifi_tvl_onchain", "infinifi_liquid_reserve", "infinifi_liquid_reserve_pct",
@@ -35,12 +35,14 @@ def collect(cfg: dict) -> tuple[dict, dict]:
     for key, slug in dl["slugs"].items():
         try:
             m[f"tvl_{key}"] = sources.defillama_tvl(dl["base_url"], slug, session)
+            if f"tvl_{key}" not in METRIC_KEYS:
+                errors[f"tvl_{key}"] = f"tvl_{key}: додайте ключ у METRIC_KEYS, щоб він потрапляв в історію"
         except Exception as e:
             errors[f"tvl_{key}"] = f"DefiLlama {slug}: {e}"
 
     eth = Chain(src["rpc"]["ethereum"], session=session)
     bsc = Chain(src["rpc"]["bsc"], session=session)
-    E, B = src["ethereum"], src["bsc"]
+    E, B = src["ethereum"], src.get("bsc") or {}
     probes = src.get("probe_amounts", {})
 
     # --- USDat: price only (Curve USDC/USDat, sell 1000 USDat) --------------
@@ -65,22 +67,22 @@ def collect(cfg: dict) -> tuple[dict, dict]:
     except Exception as e:
         errors["curve_iusd"] = f"Curve iUSD/USDC: {e}"
 
-    # --- PancakeSwap V3 USDu/USDT -------------------------------------------
-    try:
-        p = sources.v3_pool_state(bsc, B["pancake_usdu_pool"], B["usdu_token"])
-        m["price_usdu"] = p["price"]
-        m["usdu_pool_liquidity"] = p["liquidity_usd"]
-    except Exception as e:
-        errors["pancake_usdu"] = f"PancakeSwap USDu/USDT: {e}"
-        # fallback: GeckoTerminal
+    # --- PancakeSwap V3 USDu/USDT (лише якщо USDu у config) ------------------
+    if B.get("pancake_usdu_pool") and B.get("usdu_token"):
         try:
-            g = sources.geckoterminal_pool(src["geckoterminal"]["base_url"], "bsc",
-                                           B["pancake_usdu_pool"], B["usdu_token"])
-            m["price_usdu"] = g["price"]
-            m["usdu_pool_liquidity"] = g["liquidity_usd"]
-            errors["pancake_usdu"] += " (взято з GeckoTerminal)"
-        except Exception as e2:
-            errors["pancake_usdu"] += f"; GeckoTerminal: {e2}"
+            p = sources.v3_pool_state(bsc, B["pancake_usdu_pool"], B["usdu_token"])
+            m["price_usdu"] = p["price"]
+            m["usdu_pool_liquidity"] = p["liquidity_usd"]
+        except Exception as e:
+            errors["pancake_usdu"] = f"PancakeSwap USDu/USDT: {e}"
+            try:
+                g = sources.geckoterminal_pool(src["geckoterminal"]["base_url"], "bsc",
+                                               B["pancake_usdu_pool"], B["usdu_token"])
+                m["price_usdu"] = g["price"]
+                m["usdu_pool_liquidity"] = g["liquidity_usd"]
+                errors["pancake_usdu"] += " (взято з GeckoTerminal)"
+            except Exception as e2:
+                errors["pancake_usdu"] += f"; GeckoTerminal: {e2}"
 
     # --- InfiniFi on-chain --------------------------------------------------
     try:

@@ -11,6 +11,7 @@ weekly:
   hour: 10              # година за Києвом (воркфлоу запускається о 07:00 і 08:00 UTC,
                         # код сам обирає той запуск, що припадає на 10:xx за Києвом)
   reminder_weekday: 5   # субота: нагадати, якщо поінти не записані
+  points: [saturn, infinifi, tori]   # чиї поінти записуємо через /log (Unitas — позиції немає з 31.10.2026)
 
 # --- Алерти -------------------------------------------------------------------
 alerts:
@@ -24,7 +25,6 @@ alerts:
     warn_consecutive: 2
     alarm_below:              # «тривога» — одразу
       usdat: 0.985
-      usdu: 0.98
       iusd: 0.985
       trusd: 0.985            # trUSD — синтетичний долар (дельта-нейтральні стратегії), як USDe
 
@@ -56,11 +56,14 @@ alerts:
 sources:
   defillama:
     base_url: https://api.llama.fi
-    slugs:                    # перевірено 09.10.2026 на defillama.com/protocol/<slug>
+    # TVL ваших протоколів (алерти −20%/7 дн, −30%/24 год). Значення: slug, список slug-ів (сума) або chain:<Мережа>
+    slugs:
       saturn: saturn
-      unitas: unitas-usdu     # дочірній протокол «Unitas USDu»; батьківський (BSC+Solana разом) — unitas
       infinifi: infinifi
       tori: tori-finance      # перевірено 20.10.2026: Tori Finance, Basis Trading, Ethereum
+      fluid: [fluid-lending, fluid-dex]
+      mantle: "chain:Mantle"  # TVL усієї мережі Mantle
+    names: {saturn: Saturn, infinifi: InfiniFi, tori: Tori, fluid: Fluid, mantle: Mantle}
     coins_url: https://coins.llama.fi   # резервна ціна trUSD
 
   rpc:
@@ -89,10 +92,7 @@ sources:
     pendle_trusd_market: "0xfcf009cb3135da12a6eb1f73f3ee05392a7bc947" # Pendle trUSD 26NOV2026
     pendle_trusd_pt:   "0x7191878f1fe834b28f4d0cead0e4375b814c4abb"   # PT-trUSD-26NOV2026 (для self-test)
 
-  bsc:
-    usdu_token:        "0xea953ea6634d55dac6697c436b1e81a679db5882"
-    usdt_token:        "0x55d398326f99059fF775485246999027B3197955"
-    pancake_usdu_pool: "0x8aab5522d601bbb85501d703b55a272e47852120"   # PancakeSwap V3 USDu/USDT 0.01%
+  bsc: {}   # позиції USDu немає з 31.10.2026; щоб повернути — usdu_token / pancake_usdu_pool з історії git
 
   # Скільки токенів «продати» в пулі, щоб отримати ціну (через get_dy).
   # Для USDat пул ~$6.7M → 1000 ок; для iUSD пул ~$10K → лише 100.
@@ -148,9 +148,11 @@ tge:
       name: Unitas
       ticker: UP
       short: [uni, up]
-      expected: "TGE відбувся 13.03.2026 ($UP)"
-      status: "$UP уже вийшов: TGE 13.03.2026 через Binance Wallet. Стежу за новими сезонами й розподілами."
+      expected: "Season 2 — дату розподілу бот ще не бачив"
+      status: "Позиції немає. Стежу лише за розподілом нагород Season 2 ($UP за Units). TGE $UP був 13.03.2026."
+      hint: "Нагороди Season 2 зазвичай забирають на тій самій адресі, де були USDu, — не викидайте доступ до неї."
       aliases: [Unitas, "Unitas Labs", USDu, sUSDu]
+      extra_keywords: ["Season 2", S2, Units, rewards, distribution, distributed, distribute, 第二季, 奖励, 发放]
       news_query: '"Unitas" ("USDu" OR "sUSDu" OR "Unitas Labs")'
       bing_queries: ["Unitas USDu", "Unitas Labs"]
       exclude: [Johnny, Colts, NFL, football, quarterback]   # «Unitas» — ще й футболіст Johnny Unitas
@@ -308,7 +310,7 @@ security:
     pendle:      {name: Pendle, aliases: [Pendle], llama: pendle}
     curve:       {name: "Curve Finance", aliases: ["Curve Finance", "Curve pool", "Curve DAO", crvUSD], llama: curve-dex}
     pancakeswap: {name: PancakeSwap, aliases: [PancakeSwap], strict: true, llama: pancakeswap-amm-v3}
-    fluid:       {name: "Fluid (Instadapp)", aliases: ["Fluid DEX", "Fluid protocol", "Fluid lending", Instadapp], llama: fluid-lending}
+    fluid:       {name: "Fluid (Instadapp)", aliases: ["Fluid DEX", "Fluid protocol", "Fluid lending", Instadapp]}   # TVL — у власних проєктах
     morpho:      {name: Morpho, aliases: [Morpho], llama: morpho-blue}
     aave:        {name: Aave, aliases: [Aave, GHO, sGHO], strict: true, llama: aave-v3}
     euler:       {name: Euler, aliases: ["Euler Finance", Euler], llama: euler-v2}
@@ -324,6 +326,7 @@ security:
     gauntlet:    {name: "Gauntlet (куратор)", aliases: [Gauntlet], strict: true}
     upshift:     {name: Upshift, aliases: [Upshift]}
     new_silver:  {name: "New Silver (кредити під нерухомість США)", aliases: ["New Silver"]}
+    bybit:       {name: Bybit, aliases: [Bybit], strict: true}
     ceffu:       {name: "Ceffu (кастодіан Binance)", aliases: [Ceffu, MirrorX]}
     copper:      {name: "Copper (ClearLoop)", aliases: ["Copper.co", "Copper custody", ClearLoop]}
     binance:     {name: Binance, aliases: [Binance], strict: true}
@@ -378,27 +381,6 @@ security:
         - {label: sUSDat, address: "0xD166337499E176bbC38a1FBd113Ab144e5bd2Df7", supply: true}
         - {label: Withdraw, address: "0x4Bc9FEC04F0F95e9b42a3EF18F3C96fB57923D2e", note: "Черга виведення sUSDat."}
         - {label: PYUSDx SwapFacility, address: "0x0bC305e7e13113cAEd3f5486849e9518a1cC4173"}
-    unitas:
-      name: Unitas
-      aliases: [Unitas, "Unitas Labs", sUSDu]
-      exclude: [Johnny, Colts, NFL, football, quarterback]
-      deps:
-        ceffu: "кастодіан хедж-капіталу (MirrorX → суб-рахунок Binance)"
-        copper: "кастодіан off-exchange settlement"
-        binance: "шорт-перпи й маржа — основне місце хеджу, ~19% резервів"
-        jupiter: "JLP — частина резервів (~$12.5 млн на 16.10)"
-        usd1: "USD1 — частина резервів"
-        usdt: "пул USDu/USDT на PancakeSwap, частина резервів"
-        usdc: "мінт USDu"
-        pancakeswap: "пул USDu/USDT — вихід (~$0.7 млн)"
-        pendle: "sUSDu на Pendle (BSC)"
-        solana: "мережа USDu і частини резервів"
-        bnbchain: "мережа USDu (BSC)"
-        pyth: "оракул (за docs Unitas)"
-      contracts:
-        - {label: USDu (BSC), chain: bsc, address: "0xea953ea6634d55dac6697c436b1e81a679db5882", supply: true,
-           note: "Лише частина USDu на BSC; на Solana — окрема емісія."}
-        - {label: UnitasMintingV2 (BSC), chain: bsc, address: "0xbb984ce670100aa855f6152f88b26ee57f4ea82a"}
     infinifi:
       name: infiniFi
       aliases: [infiniFi, siUSD, liUSD, "infiniFi USD"]
@@ -413,6 +395,46 @@ security:
         - {label: iUSD, address: "0x48f9e38f3070AD8945DFEae3FA70987722E3D89c", supply: true}
         - {label: siUSD, address: "0xDBDC1Ef57537E34680B898E1FEBD3D68c7389bCB"}
         - {label: LockingController, address: "0x1d95cC100D6Cd9C7BbDbD7Cb328d99b3D6037fF7"}
+
+    fluid:
+      name: Fluid
+      # «Fluid» без уточнення в англійських новинах — звичайне слово («the situation remains fluid»),
+      # тож голе «Fluid» рахуємо лише в китайських текстах (cjk_aliases)
+      aliases: ["Fluid DEX", "Fluid protocol", "Fluid Lending", "Fluid Finance", "Fluid vault", "Fluid vaults",
+                Instadapp, fUSDC, fUSDT]
+      cjk_aliases: [Fluid]
+      exclude: ["remains fluid", "fluid situation", "stays fluid", "situation is fluid"]
+      deps:
+        usdc: "основний актив lending (fUSDC) і пар DEX"
+        usdt: "основний актив lending (fUSDT) і пар DEX"
+        ethena: "USDe / sUSDe — одна з найбільших застав і пар на Fluid"
+        chainlink: "оракули ринків (разом з іншими фідами)"
+      contracts:
+        - {label: Liquidity, address: "0x52Aa899454998Be5b000Ad077a46Bbe360F4e497",
+           sig_impls: {operate: "0xad967e15", updateAuths: "0x3f66feff"},
+           note: "Ядро Fluid: тут лежать кошти всіх lending, vaults і DEX. InfiniteProxy — бот стежить і за адміном, і за реалізаціями операцій."}
+        - {label: fUSDC, address: "0x9Fb7b4477576Fe5B32be4C1843aFB1e55F251B33", rate: {getter: "convertToAssets(uint256)", unit: 6}}
+        - {label: fUSDT, address: "0x5C20B550819128074FD538Edf79791733ccEdd18", rate: {getter: "convertToAssets(uint256)", unit: 6}}
+    mantle:
+      name: Mantle
+      aliases: ["Mantle Network", Mantle, "mETH Protocol", mETH, cmETH]
+      exclude: ["takes up the mantle", "take up the mantle", "taking up the mantle", "mantle of", fireplace]
+      deps:
+        bybit: "біржа, тісно пов'язана з Mantle (у лютому 2025 серед викраденого з Bybit були mETH і cmETH)"
+        usdc: "основний стейбл у мережі Mantle"
+        usdt: "основний стейбл у мережі Mantle"
+      contracts:
+        - {label: OptimismPortal, address: "0xc54cb22944F2bE476E02dECfCD7e3E7d3e15A8Fb",
+           note: "L1-портал Mantle: через нього виводять ETH і MNT з мережі Mantle на Ethereum."}
+        - {label: L1StandardBridge, address: "0x95fC37A27a2f68e3A647CDc081F0A89bb47c3012", note: "Міст токенів Ethereum ↔ Mantle."}
+        - {label: L1CrossDomainMessenger, address: "0x676A795fe6E43C17c668de16730c3F690FEB7120"}
+        - {label: SystemConfig, address: "0x427Ea0710FA5252057F0D88274f7aeb308386cAf"}
+        - {label: ProxyAdmin, address: "0xca35F8338054739D138884685e08b39EE2217794", note: "Хто може оновлювати контракти моста."}
+        - {label: mETH Staking, address: "0xe3cBd06D7dadB3F4e6557bAb7EdD924CD1489E8f",
+           rate: {getter: "mETHToETH(uint256)", unit: 18}, note: "Курс mETH→ETH у нормі лише росте; падіння — slashing або збиток."}
+        - {label: mETH, address: "0xd5F7838F5C461fefF7FE49ea5ebaF7728bB0ADfa", supply: true}
+        - {label: mETH Pauser, address: "0x29Ab878aEd032e2e2c86FF4A9a9B05e3276cf1f8",
+           flags: ["isStakingPaused()", "isUnstakeRequestsAndClaimsPaused()"]}
 
 # --- Файли стану ---------------------------------------------------------------
 files:

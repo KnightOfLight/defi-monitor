@@ -1,4 +1,4 @@
-# defi-monitor — Telegram-бот для моніторингу Saturn / Unitas / InfiniFi / Tori (Pendle trUSD)
+# defi-monitor — Telegram-бот для моніторингу Saturn / InfiniFi / Tori (Pendle trUSD) / Fluid / Mantle
 
 Бот раз на 15–30 хвилин збирає ціни, TVL, стан ринку Pendle trUSD (Tori) та InfiniFi, порівнює з порогами з `config.yaml`
 і надсилає алерти в Telegram. Щоп'ятниці о 10:00 за Києвом — дайджест із проханням записати поінти
@@ -21,7 +21,7 @@ TGE / airdrop усіх чотирьох проєктів і нагадує пр�
 
 - Акаунти Telegram і GitHub.
 - ~30 хвилин на кроки 1–8 (один раз).
-- Щоп'ятниці — відповісти боту числами поінтів (Saturn, Unitas, InfiniFi, Tori Cores).
+- Щоп'ятниці — відповісти боту числами поінтів (Saturn, InfiniFi, Tori Cores).
 
 ---
 
@@ -143,6 +143,13 @@ github.com → **New repository**:
 отримують `tori_points`, `tvl_tori`, `price_trusd`, `strusd_rate`, `pendle_pt_price`, `pendle_implied_apy`,
 `pendle_liquidity`. Порівняння «за 24 год / 7 днів» для нових метрик з'являться через добу й тиждень.
 
+## Оновлення до v1.3 (31.10.2026): новий набір проєктів
+
+Безпека — Saturn, Tori, infiniFi, **Fluid**, **Mantle**; TGE — Saturn, Tori, infiniFi; Unitas — лише розподіл
+нагород Season 2 (у `/tge`). Ціна USDu, TVL і поінти Unitas більше не відстежуються; старі значення в журналі
+лишаються. Код читає набір проєктів з `config.yaml`, тож надалі додати чи прибрати проєкт — правка конфігу:
+`sources.defillama.slugs` (TVL), `weekly.points` (поінти), `security.projects` (безпека), `tge.projects` (TGE).
+
 ## Розклад: GitHub запускає бота рідше, ніж написано
 
 `*/15 * * * *` у `monitor.yml` — лише побажання: GitHub сам вирішує, коли запускати розклад, і під навантаженням
@@ -176,7 +183,7 @@ github.com → **New repository**:
 | Команда | Що робить |
 |---|---|
 | `/status` | поточні значення всіх метрик і рівень відносно порогів (✅ норма / ⚠️ увага / 🚨 тривога) |
-| `/log saturn 123456 unitas 7890 infinifi 4567 tori 2500` | записати поінти в рядок журналу (п'ятничний, якщо він ще без поінтів; інакше — сьогоднішній). `tori` (або `cores`) — поінти Tori Cores. Можна вказати не всі; `123,456` і `123 456` розпізнаються; текст «saturn 123 tori 45» без `/log` теж приймається |
+| `/log saturn 123456 infinifi 4567 tori 2500` | записати поінти в рядок журналу (п'ятничний, якщо він ще без поінтів; інакше — сьогоднішній). `tori` (або `cores`) — поінти Tori Cores. Можна вказати не всі; `123,456` і `123 456` розпізнаються; текст «saturn 123 tori 45» без `/log` теж приймається |
 | `/note текст` | дописати примітку до останнього рядка |
 | `/export` | надіслати `journal.csv` файлом + підсумок за тиждень і місяць (зручно вставити в Claude) |
 | `/thresholds` | показати пороги |
@@ -201,8 +208,8 @@ strUSD і нагадування про погашення працюють од
 
 | Сигнал | Увага | Тривога | Коли дізнаєтесь |
 |---|---|---|---|
-| Ціна USDat / USDu / iUSD / trUSD | < $0.995 на 2 перевірках поспіль | < $0.985 (USDu < $0.98) одразу | ~1 год / до 30 хв |
-| TVL Saturn / Unitas / InfiniFi / Tori (DefiLlama) | −20% за 7 днів | −30% за 24 год | до 30 хв |
+| Ціна USDat / iUSD / trUSD | < $0.995 на 2 перевірках поспіль | < $0.985 одразу | ~1 год / до 30 хв |
+| TVL Saturn / InfiniFi / Tori / Fluid / Mantle (DefiLlama) | −20% за 7 днів | −30% за 24 год | до 30 хв |
 | TVL Saturn | ℹ️ при > $800 млн | — | до 30 хв |
 | Pendle trUSD: ціна PT (у trUSD) | −0.5% за 24 год | −1.5% за 24 год | до 30 хв |
 | Pendle trUSD: implied APY | > 30% на 2 перевірках (крім останніх 7 днів до погашення) | — | ~1 год |
@@ -216,7 +223,9 @@ strUSD і нагадування про погашення працюють од
 | Джерело даних не відповідає | 3 запуски поспіль | — | ~1,5 год |
 | 🛡 Контракт вашого протоколу: оновлено proxy / змінено owner чи minter | — | одразу | до ~30 хв |
 | 🛡 Контракт на паузі (`paused() = true`) | — | одразу (і ✅ коли знято) | до ~30 хв |
-| 🛡 Емісія стейбла (trUSD, USDat, sUSDat, USDu, iUSD) | +10% за запуск; −15% за 24 год | +50% за запуск (безконтрольний мінт); −30% за 24 год | до ~30 хв |
+| 🛡 Емісія токена (trUSD, strUSD, USDat, sUSDat, iUSD, mETH) | +10% за запуск; −15% за 24 год | +50% за запуск (безконтрольний мінт); −30% за 24 год | до ~30 хв |
+| 🛡 Курс частки (fUSDC, fUSDT, mETH→ETH) | — | будь-яке падіння (списаний збиток) | до ~30 хв |
+| 🛡 Прапорець паузи (mETH: staking, unstake/claims) | — | одразу | до ~30 хв |
 | 🛡 Стейблкоїн-залежність (USDC, USDT, PYUSD, USDe, frxUSD, USD1) | < $0.99 | < $0.97 | до ~30 хв |
 | 🛡 TVL протоколу-залежності (Pendle, Morpho, Aave, Curve, Fluid…) | −25% за 6 год | −40% за 6 год | до ~1,5 год |
 | 🛡 Новина «hack / exploit / 被盗…» + назва вашого проєкту | — | одразу | хвилини–години після X |
@@ -239,8 +248,9 @@ GitHub іноді запускає розклад із затримкою 5–20
 - Після погашення 26.11.2026, якщо перекладете позицію в новий ринок: замініть `sources.ethereum.pendle_trusd_market`
   і `pendle_trusd_pt` на адреси нового ринку (бот сам надішле їх, щойно ринок з'явиться).
 - `alerts.repeat_hours: 6` — частота повторів.
-- `sources.defillama.slugs.unitas: unitas-usdu` — дочірній протокол «Unitas USDu» (саме USDu, BSC + Solana).
-  Батьківський `unitas` рахує разом із sUSDu та іншими продуктами.
+- `sources.defillama.slugs` — TVL ваших протоколів: slug, список slug-ів (сума; Fluid = `fluid-lending` +
+  `fluid-dex`) або `chain:Mantle` (уся мережа). Прибрати проєкт — видалити рядок.
+- `weekly.points` — чиї поінти записуються через `/log` (зараз Saturn, InfiniFi, Tori).
 - Адреси пулів — у `sources.ethereum` / `sources.bsc`. Знайти найглибший пул для токена:
   `python tools/find_pools.py bsc 0xea953ea6634d55dac6697c436b1e81a679db5882`.
 
@@ -274,14 +284,17 @@ GitHub іноді запускає розклад із затримкою 5–20
 |---|---|
 | Tori | ваша позиція на **Pendle**; вихід — **Fluid** (trUSD/USDC) і **Curve** (frxUSD/trUSD); PT-trUSD — застава на **Morpho**; мінт за **USDC/USDT**; міст **Chainlink CCIP**, OFT **LayerZero**; оракул strUSD на Monad — **RedStone**; Ecosystem Vault — **Upshift**; резерви у кастодіанів і на біржах, яких Tori не називає |
 | Saturn | USDat забезпечений **PYUSDx** (MoonPay) ← **PYUSD** (Paxos), маршрут мінту **M0**, мінт/погашення в **USDC**; sUSDat — 100% **STRC** (Strategy) через **Ondo STRCon**, кастодіан **Clear Street**, адміністратор **Securitize**, ціна — фід **Chainlink**; гаманці — **Fireblocks** MPC; вихід — пули **Curve** і **PancakeSwap** |
-| Unitas | хедж — шорт-перпи на **Binance**, капітал у **Ceffu** (MirrorX) і **Copper**; у резервах BTC, **JLP** (Jupiter), **USD1**, USDT; вихід — **PancakeSwap** USDu/USDT; мережі **Solana** і **BNB Chain**; оракул **Pyth** |
+| Fluid | **Liquidity** — один контракт, де лежать кошти всіх lending, vaults і DEX Fluid; основні активи **USDC/USDT**, велика частка **Ethena** (USDe/sUSDe); оракули — **Chainlink** та інші |
+| Mantle | L1-контракти мережі Mantle на Ethereum (**OptimismPortal**, **L1StandardBridge**, messenger, ProxyAdmin) — через них ходять усі кошти Ethereum ↔ Mantle; **mETH** (Mantle LSP: Staking, Pauser); тісно пов'язана біржа — **Bybit** |
 | infiniFi | усе в **USDC**; гроші розкладені по фармах — бот щогодини читає їх on-chain (FarmRegistry) і бере назви з deployment-файлу infiniFi на GitHub: **Aave, Morpho, Euler, Fluid, Spark, Ethena, Maple, Pendle, Cap, Midas/Fasanara, FalconX/Pareto, Reservoir, Level, f(x)**…; мости Outland на Base/Monad |
 
 Як бот дізнається, що щось зламано, — від найшвидшого до найширшого:
 
-1. **On-chain ваших протоколів — кожен запуск (~15 хв).** 16 контрактів (trUSD, strUSD, ToriMinting, SY-trUSD;
-   USDat, sUSDat, Withdraw, SwapFacility; USDu і UnitasMinting на BSC; Gateway, Mint/RedeemController, iUSD, siUSD,
-   LockingController): зміна EIP-1967 proxy (implementation / admin / beacon), `owner()` чи `minter()` — тривога
+1. **On-chain ваших протоколів — кожен запуск (~15 хв).** 25 контрактів (trUSD, strUSD, ToriMinting, SY-trUSD;
+   USDat, sUSDat, Withdraw, SwapFacility; Gateway, Mint/RedeemController, iUSD, siUSD, LockingController;
+   Fluid Liquidity, fUSDC, fUSDT; Mantle OptimismPortal, L1StandardBridge, L1CrossDomainMessenger, SystemConfig,
+   ProxyAdmin, mETH Staking, mETH, Pauser): зміна EIP-1967 proxy (implementation / admin / beacon), `owner()`
+   чи `minter()`, а у Fluid — реалізацій функцій InfiniteProxy (`operate`, `updateAuths`) — тривога
    (планові оновлення теж, але тихе оновлення — типовий шлях, яким викрадений ключ стає зламом); `paused()` —
    тривога; стрибок `totalSupply()` — ознака безконтрольного мінту, обвал — масового виходу. Які перевірки
    застосовні до контракту, бот визначає сам раз на добу.
@@ -311,7 +324,7 @@ GitHub іноді запускає розклад із затримкою 5–20
 | Проєкт | Токен | TGE |
 |---|---|---|
 | Saturn | STRN | Q4 2026, дати немає. Snapshot сезону 2 — перед TGE, якщо TGE до 08.12.2026 |
-| Unitas | $UP | **уже відбувся** 13.03.2026 (Binance Wallet); бот стежить за новими сезонами/розподілами |
+| Unitas | $UP | TGE був 13.03.2026; позиції немає — бот стежить лише за **розподілом нагород Season 2** |
 | infiniFi | INFI | Q4 2026, дати немає; токеноміка опублікована 14.10.2026 |
 | Tori | — | токен не анонсовано; поінти Cores, сезон 1 |
 
@@ -340,9 +353,8 @@ GitHub іноді запускає розклад із затримкою 5–20
 
 | Метрика | Джерело | Примітка |
 |---|---|---|
-| TVL ×4 | DefiLlama `api.llama.fi/tvl/<slug>` (резерв `/protocol/<slug>`) | slug-и `saturn`, `unitas-usdu`, `infinifi`, `tori-finance` |
+| TVL ×5 | DefiLlama `api.llama.fi/tvl/<slug>` (резерв `/protocol/<slug>`), мережа — `/v2/chains` | `saturn`, `infinifi`, `tori-finance`, `fluid-lending`+`fluid-dex`, `chain:Mantle` |
 | Ціна USDat | Curve-пул `0xf4d0…96d7` через `eth_call` (`get_dy`) | продаж 1 000 USDat → ціна в USDC |
-| Ціна USDu | PancakeSwap V3 USDu/USDT 0.01% `0x8aab…2120`, `slot0()` через `eth_call` | резерв — GeckoTerminal; ліквідність ~$0.7 млн |
 | Ціна iUSD | Curve iUSD/USDC `0x2e2d…986e`, `get_dy` на 100 iUSD | **пул ~$8–10 тис.** — ціна індикативна; дивіться також курс погашення у `/status` |
 | Ціна trUSD | Curve frxUSD/trUSD `0xd1d9…6ff`, `get_dy` на 1 000 trUSD | ціна у frxUSD; резерв — `coins.llama.fi`. Найбільший обіг trUSD — на Fluid (USDC), але Fluid DEX бот не читає |
 | PT-trUSD, implied APY, ліквідність ринку, дні до погашення | Pendle-ринок `0xfcf0…c947`: `expiry()`, `readTokens()`, `_storage()` (totalPt, totalSy, lastLnImpliedRate), SY `exchangeRate()` | APY = e^lnRate − 1; PT = e^(−lnRate·t/рік); резерв — `api-v2.pendle.finance` |

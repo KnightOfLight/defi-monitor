@@ -11,7 +11,7 @@ from .metrics import METRIC_KEYS
 
 JOURNAL_COLUMNS = [
     "date", "saturn_points", "unitas_points", "infinifi_points", "tori_points",
-    "tvl_saturn", "tvl_unitas", "tvl_infinifi", "tvl_tori",
+    "tvl_saturn", "tvl_unitas", "tvl_infinifi", "tvl_tori", "tvl_fluid", "tvl_mantle",
     "price_usdat", "price_usdu", "price_iusd", "price_trusd",
     "liusd13w_rate", "infinifi_liquid_reserve",
     "strusd_rate", "pendle_pt_price", "pendle_implied_apy", "pendle_liquidity",
