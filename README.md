@@ -285,14 +285,14 @@ GitHub іноді запускає розклад із затримкою 5–20
 | Tori | ваша позиція на **Pendle**; вихід — **Fluid** (trUSD/USDC) і **Curve** (frxUSD/trUSD); PT-trUSD — застава на **Morpho**; мінт за **USDC/USDT**; міст **Chainlink CCIP**, OFT **LayerZero**; оракул strUSD на Monad — **RedStone**; Ecosystem Vault — **Upshift**; резерви у кастодіанів і на біржах, яких Tori не називає |
 | Saturn | USDat забезпечений **PYUSDx** (MoonPay) ← **PYUSD** (Paxos), маршрут мінту **M0**, мінт/погашення в **USDC**; sUSDat — 100% **STRC** (Strategy) через **Ondo STRCon**, кастодіан **Clear Street**, адміністратор **Securitize**, ціна — фід **Chainlink**; гаманці — **Fireblocks** MPC; вихід — пули **Curve** і **PancakeSwap** |
 | Fluid | **Liquidity** — один контракт, де лежать кошти всіх lending, vaults і DEX Fluid; основні активи **USDC/USDT**, велика частка **Ethena** (USDe/sUSDe); оракули — **Chainlink** та інші |
-| Mantle | L1-контракти мережі Mantle на Ethereum (**OptimismPortal**, **L1StandardBridge**, messenger, ProxyAdmin) — через них ходять усі кошти Ethereum ↔ Mantle; **mETH** (Mantle LSP: Staking, Pauser); тісно пов'язана біржа — **Bybit** |
+| Mantle | L1-контракти мережі Mantle на Ethereum (**OptimismPortal**, **L1StandardBridge**, SystemConfig, ProxyAdmin) — через них ходять усі кошти Ethereum ↔ Mantle; **mETH** (Mantle LSP: Staking, Pauser); тісно пов'язана біржа — **Bybit** |
 | infiniFi | усе в **USDC**; гроші розкладені по фармах — бот щогодини читає їх on-chain (FarmRegistry) і бере назви з deployment-файлу infiniFi на GitHub: **Aave, Morpho, Euler, Fluid, Spark, Ethena, Maple, Pendle, Cap, Midas/Fasanara, FalconX/Pareto, Reservoir, Level, f(x)**…; мости Outland на Base/Monad |
 
 Як бот дізнається, що щось зламано, — від найшвидшого до найширшого:
 
-1. **On-chain ваших протоколів — кожен запуск (~15 хв).** 25 контрактів (trUSD, strUSD, ToriMinting, SY-trUSD;
+1. **On-chain ваших протоколів — кожен запуск (~15 хв).** 24 контракти (trUSD, strUSD, ToriMinting, SY-trUSD;
    USDat, sUSDat, Withdraw, SwapFacility; Gateway, Mint/RedeemController, iUSD, siUSD, LockingController;
-   Fluid Liquidity, fUSDC, fUSDT; Mantle OptimismPortal, L1StandardBridge, L1CrossDomainMessenger, SystemConfig,
+   Fluid Liquidity, fUSDC, fUSDT; Mantle OptimismPortal, L1StandardBridge, SystemConfig,
    ProxyAdmin, mETH Staking, mETH, Pauser): зміна EIP-1967 proxy (implementation / admin / beacon), `owner()`
    чи `minter()`, а у Fluid — реалізацій функцій InfiniteProxy (`operate`, `updateAuths`) — тривога
    (планові оновлення теж, але тихе оновлення — типовий шлях, яким викрадений ключ стає зламом); `paused()` —

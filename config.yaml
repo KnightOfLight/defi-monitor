@@ -427,7 +427,6 @@ security:
         - {label: OptimismPortal, address: "0xc54cb22944F2bE476E02dECfCD7e3E7d3e15A8Fb",
            note: "L1-портал Mantle: через нього виводять ETH і MNT з мережі Mantle на Ethereum."}
         - {label: L1StandardBridge, address: "0x95fC37A27a2f68e3A647CDc081F0A89bb47c3012", note: "Міст токенів Ethereum ↔ Mantle."}
-        - {label: L1CrossDomainMessenger, address: "0x676A795fe6E43C17c668de16730c3F690FEB7120"}
         - {label: SystemConfig, address: "0x427Ea0710FA5252057F0D88274f7aeb308386cAf"}
         - {label: ProxyAdmin, address: "0xca35F8338054739D138884685e08b39EE2217794", note: "Хто може оновлювати контракти моста."}
         - {label: mETH Staking, address: "0xe3cBd06D7dadB3F4e6557bAb7EdD924CD1489E8f",
