@@ -695,7 +695,8 @@ class HackNews:
             # злам Morpho чи депег USDT видно в цифрах — тоді прийде або цей алерт, або алерт по ціні/TVL з новинами.
             proof = None if t["own"] or not measured(self.cfg, t.get("dep", "")) else \
                 corroboration(self.cfg, self.state, t["dep"], self.now)
-            quiet = not t["own"] and measured(self.cfg, t.get("dep", "")) and not proof
+            quiet = not t["own"] and ((measured(self.cfg, t.get("dep", "")) and not proof)
+                                      or (deps(self.cfg).get(t.get("dep", "")) or {}).get("quiet_news"))
             for it in items:
                 self.st["items"].append({"target": tkey, "name": t["name"], "title": it["title"][:200],
                                          "link": it["link"], "via": it["via"], "ts": iso(it.get("ts") or self.now),

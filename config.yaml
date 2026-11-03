@@ -278,9 +278,10 @@ security:
                     arrested, sentenced, extradited, convicted, "pleads guilty", recovers, recovered, "returns funds",
                     "funds returned", reimburse, reimburses, reimbursement, compensation, "post-mortem", postmortem,
                     anniversary, "months after", "year after", "years after", "biggest hacks", "largest hacks",
-                    "top hacks", "lessons learned", explained, "a look back",
+                    "top hacks", "lessons learned", explained, "a look back", meme, 梗图, 表情包,
                     起诉, 诉讼, 法院, 判决, 逮捕, 被捕, 赔偿, 追回, 复盘, 回顾]
   unaffected_keywords: [unaffected, "not affected", "not impacted", "remain safe", "funds are safe", "funds safe",
+                        "never been hacked", "never hacked", "never been exploited", "has never", 从未, 未曾, 没有被,
                         未受影响, 不受影响, 资金安全]
   # для «широких» назв (Binance, USDC, Solana…): слово має йти одразу за назвою — «Bybit hacked», а не
   # «hacker sent funds to Binance»
@@ -330,7 +331,9 @@ security:
     ceffu:       {name: "Ceffu (кастодіан Binance)", aliases: [Ceffu, MirrorX]}
     copper:      {name: "Copper (ClearLoop)", aliases: ["Copper.co", "Copper custody", ClearLoop]}
     binance:     {name: Binance, aliases: [Binance], strict: true}
-    cex_generic: {name: "Великі біржі (OKX, Bybit, Deribit, Hyperliquid)", aliases: [OKX, Bybit, Deribit, Hyperliquid], strict: true}
+    # жоден ваш проєкт не розкриває, чи тримає щось на цих біржах, — новини лише тихо в /security і дайджест
+    cex_generic: {name: "Великі біржі (OKX, Bybit, Deribit, Hyperliquid)", aliases: [OKX, Bybit, Deribit, Hyperliquid],
+                  strict: true, quiet_news: true}
     jupiter:     {name: "Jupiter (JLP)", aliases: ["Jupiter Exchange", "Jupiter Perps", JLP], strict: true, llama: jupiter-perpetual-exchange}
     solana:      {name: Solana, aliases: [Solana], strict: true}
     bnbchain:    {name: "BNB Chain", aliases: ["BNB Chain", "BNB Smart Chain"], strict: true}
