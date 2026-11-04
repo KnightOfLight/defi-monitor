@@ -247,6 +247,10 @@ security:
     search_check_hours: 1         # Bing і пошук по ваших проєктах — щогодини
     max_age_hours: 48
     cooldown_hours: 12            # той самий об'єкт — не частіше раз на 12 год (решта згадок — у /security)
+    # Новини про ЗАЛЕЖНОСТІ (не ваші проєкти): quiet — лише в /security і в п'ятничний дайджест, сповіщення
+    # тільки якщо цифри підтверджують (ціна стейбла < 0.995 або TVL протоколу −10% за 6 год);
+    # send — як раніше, сповіщати про кожен збіг. 20.10–04.11 усі 7 сповіщень «send» виявились хибними.
+    dependency_alerts: quiet
     # Новина про залежність, яку бот вимірює (є coin або llama), надсилається, лише якщо цифри теж рухаються:
     # ціна стейбла < 0.995 або TVL протоколу −10% за 6 год. Інакше — тихо в /security.
     # Для залежностей без цифр (кастодіани, біржі, мости) і для ваших проєктів — надсилається одразу.
@@ -279,6 +283,8 @@ security:
                     "funds returned", reimburse, reimburses, reimbursement, compensation, "post-mortem", postmortem,
                     anniversary, "months after", "year after", "years after", "biggest hacks", "largest hacks",
                     "top hacks", "lessons learned", explained, "a look back", meme, 梗图, 表情包,
+                    "archive footage", archive, "highlight clip", interview, podcast, AMA, "must prepare",
+                    "prepare for", "how to protect", 采访, 访谈, 回放,
                     起诉, 诉讼, 法院, 判决, 逮捕, 被捕, 赔偿, 追回, 复盘, 回顾]
   unaffected_keywords: [unaffected, "not affected", "not impacted", "remain safe", "funds are safe", "funds safe",
                         "never been hacked", "never hacked", "never been exploited", "has never", 从未, 未曾, 没有被,

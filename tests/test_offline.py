@@ -910,6 +910,8 @@ class TestSecurity(unittest.TestCase):
         # регресія 03.11: мем від CEO OKX — «ніколи не був зламаний північнокорейськими хакерами»
         self.assertEqual(m("Star发文配「金正恩扮死神敲OKX门」梗图：从未因朝鲜黑客被盗既自豪也有压力，安全面前全行业应站在一起"), [])
         self.assertEqual(m("OKX has never been hacked, says CEO"), [])
+        # регресія 04.11: архівне відео з CEO Bybit
+        self.assertEqual(m("Highlight Clip: Bybit CEO: Exchanges Must Prepare for Hacks to Happen(ARCHIVE FOOTAGE)"), [])
         who = security.dependents(self.cfg, st, "pendle")
         self.assertTrue(any("ринок PT/LP trUSD" in w for _, w in who))
         self.assertEqual(security.farm_dep("FARM_PENDLEV3_RUSD_30OCT25", [("RUSD", "reservoir"), ("PENDLE", "pendle")]),
@@ -978,9 +980,14 @@ class TestSecurity(unittest.TestCase):
         self.assertIn("Цифри теж рухаються: <b>ціна USDT (Tether) = $0.9800</b>", msgs[0])
         self.assertIn("Стосується Fluid", msgs[0])
         self.assertNotIn("Unitas", msgs[0])                                      # позиції немає з 31.10
-        # кастодіан без цифр — одразу
+        # кастодіан без цифр: за замовчуванням (dependency_alerts: quiet) — тихо, у режимі send — одразу
         feed["v"] = rss([("Fireblocks hacked: $40M drained from MPC wallets", "c", T0 + timedelta(minutes=40))])
-        msgs = security.run_news(cfg, st, T0 + timedelta(minutes=45), sess)
+        self.assertEqual(security.run_news(cfg, st, T0 + timedelta(minutes=45), sess), [])
+        self.assertTrue(st["security"]["news"]["items"][-1]["quiet"])
+        self.assertIn("Fireblocks hacked", security.digest_line(st, T0 + timedelta(hours=1)))
+        cfg["security"]["news"]["dependency_alerts"] = "send"
+        feed["v"] = rss([("Fireblocks wallets drained again in second exploit", "c2", T0 + timedelta(minutes=48))])
+        msgs = security.run_news(cfg, st, T0 + timedelta(minutes=58), sess)
         self.assertEqual(len(msgs), 1)
         self.assertIn("Fireblocks", msgs[0])
         self.assertIn("Стосується Saturn", msgs[0])
@@ -990,8 +997,8 @@ class TestSecurity(unittest.TestCase):
         self.assertIn("Новини за добу", mm._who("usdt"))
         self.assertIn("depegs to $0.98", mm._who("usdt"))
         # біржі, про які проєкти нічого не розкривають, — лише тихо
-        feed["v"] = rss([("OKX hacked: $90M drained from hot wallet", "d", T0 + timedelta(minutes=55))])
-        self.assertEqual(security.run_news(cfg, st, T0 + timedelta(minutes=60), sess), [])   # через ≥12 хв — джерело due
+        feed["v"] = rss([("OKX hacked: $90M drained from hot wallet", "d", T0 + timedelta(minutes=70))])
+        self.assertEqual(security.run_news(cfg, st, T0 + timedelta(minutes=75), sess), [])   # через ≥12 хв — джерело due
         self.assertTrue(st["security"]["news"]["items"][-1]["quiet"])
         # Morpho більше не пряма залежність Tori (тиск на PT і так видно в алерті по ціні PT)
         self.assertNotIn("morpho", cfg["security"]["projects"]["tori"]["deps"])

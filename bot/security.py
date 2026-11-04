@@ -695,8 +695,15 @@ class HackNews:
             # злам Morpho чи депег USDT видно в цифрах — тоді прийде або цей алерт, або алерт по ціні/TVL з новинами.
             proof = None if t["own"] or not measured(self.cfg, t.get("dep", "")) else \
                 corroboration(self.cfg, self.state, t["dep"], self.now)
-            quiet = not t["own"] and ((measured(self.cfg, t.get("dep", "")) and not proof)
-                                      or (deps(self.cfg).get(t.get("dep", "")) or {}).get("quiet_news"))
+            if t["own"]:
+                quiet = False
+            elif str(self.T.get("dependency_alerts", "quiet")) == "send":
+                quiet = bool((measured(self.cfg, t.get("dep", "")) and not proof)
+                             or (deps(self.cfg).get(t.get("dep", "")) or {}).get("quiet_news"))
+            else:
+                # за замовчуванням новина про залежність — лише в /security і дайджест; сповіщення — тільки
+                # коли цифри підтверджують (ціна стейбла / TVL протоколу вже рухаються)
+                quiet = not proof
             for it in items:
                 self.st["items"].append({"target": tkey, "name": t["name"], "title": it["title"][:200],
                                          "link": it["link"], "via": it["via"], "ts": iso(it.get("ts") or self.now),
@@ -889,4 +896,10 @@ def digest_line(state: dict, now: datetime) -> str | None:
     st = _st(state)
     week = now - timedelta(days=7)
     n = sum(1 for ts, _ in st["log"] if (parse_iso(ts) or now) >= week)
-    return f"🛡 Безпека: подій за тиждень — {n}" + (" (деталі: /security)" if n else " ✅")
+    line = f"🛡 Безпека: подій за тиждень — {n}" + (" (деталі: /security)" if n else " ✅")
+    quiet = [x for x in st["news"]["items"] if x.get("quiet") and (parse_iso(x.get("ts")) or now) >= week]
+    if quiet:
+        line += f"\nНовини про залежності без сповіщення ({len(quiet)}), останні:"
+        for x in quiet[-3:]:
+            line += f"\n• {esc(x['name'])}: {esc(x['title'][:110])}"
+    return line
