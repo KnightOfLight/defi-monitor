@@ -285,7 +285,8 @@ security:
                     "top hacks", "lessons learned", explained, "a look back", meme, 梗图, 表情包,
                     "archive footage", archive, "highlight clip", interview, podcast, AMA, "must prepare",
                     "prepare for", "how to protect", 采访, 访谈, 回放,
-                    起诉, 诉讼, 法院, 判决, 逮捕, 被捕, 赔偿, 追回, 复盘, 回顾]
+                    起诉, 诉讼, 法院, 判决, 逮捕, 被捕, 赔偿, 追回, 复盘, 回顾,
+                    被判, 判处, 判刑, 获刑, 监禁, 入狱, 引渡, prison, jail, jailed, "years in prison"]
   unaffected_keywords: [unaffected, "not affected", "not impacted", "remain safe", "funds are safe", "funds safe",
                         "never been hacked", "never hacked", "never been exploited", "has never", 从未, 未曾, 没有被,
                         未受影响, 不受影响, 资金安全]
@@ -426,7 +427,8 @@ security:
         - {label: fUSDT, address: "0x5C20B550819128074FD538Edf79791733ccEdd18", rate: {getter: "convertToAssets(uint256)", unit: 6}}
     mantle:
       name: Mantle
-      aliases: ["Mantle Network", Mantle, "mETH Protocol", mETH, cmETH]
+      aliases: ["Mantle Network", "Mantle bridge", "Mantle chain", "mETH Protocol", mETH, cmETH, "Mantle LSP"]
+      strict_aliases: [Mantle, 曼特尔]   # голе «Mantle» — лише «Mantle hacked / Mantle 遭攻击», не «токен X на Mantle»
       exclude: ["takes up the mantle", "take up the mantle", "taking up the mantle", "mantle of", fireplace]
       deps:
         bybit: "біржа, тісно пов'язана з Mantle (у лютому 2025 серед викраденого з Bybit були mETH і cmETH)"

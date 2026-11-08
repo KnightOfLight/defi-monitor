@@ -147,7 +147,7 @@ def news_targets(cfg: dict, state: dict) -> list[dict]:
     out = []
     for pk, p in projects(cfg).items():
         out.append({"key": f"own:{pk}", "own": True, "name": p.get("name", pk), "aliases": p.get("aliases", []),
-                    "cjk_aliases": p.get("cjk_aliases", []),
+                    "cjk_aliases": p.get("cjk_aliases", []), "strict_aliases": p.get("strict_aliases", []),
                     "strict": False, "exclude": p.get("exclude", []), "project": pk})
     used = set()
     for p in projects(cfg).values():
@@ -556,7 +556,11 @@ def _hit_in(s: str, t: dict, kws: list[str], strong: list[str]) -> bool:
     aliases = list(t["aliases"])
     if t.get("cjk_aliases") and _CJK.search(s):    # «Fluid 遭攻击»: голе «Fluid» — лише в китайському тексті
         aliases += list(t["cjk_aliases"])
-    return bool(tge.hits(s, aliases))
+    if tge.hits(s, aliases):
+        return True
+    # назва мережі (Mantle): згадка «на Mantle» в новині про чужий злам — не злам Mantle;
+    # рахуємо лише «Mantle hacked / Mantle 遭攻击», як для широких назв залежностей
+    return any(_strict_hit(s, a, strong + extra) for a in t.get("strict_aliases") or [])
 
 
 def match(item: dict, targets: list[dict], T: dict, scope_full: bool) -> list[dict]:

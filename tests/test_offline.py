@@ -1147,6 +1147,16 @@ class TestPortfolioV13(unittest.TestCase):
         self.assertNotIn("own:fluid", m("Situation remains fluid after Bybit hack"))
         self.assertEqual(m("Mantle Network bridge exploited, attacker drains $20M"), ["own:mantle"])
         self.assertEqual(m("Ex-CEO takes up the mantle after exchange hack"), [])
+        # регресія 08.11: вирок за злам Holograph 2024 р. (HLG на мережі Mantle) — не злам Mantle
+        holo = {"title": "【Holograph 攻击者被判 5 年监禁，曾非法增发 10 亿枚 HLG】",
+                "text": "【Holograph 攻击者被判 5 年监禁，曾非法增发 10 亿枚 HLG】\n"
+                        "该攻击者于 2024 年利用漏洞在 Mantle 网络上非法增发 10 亿枚 HLG，遭攻击后代币价格暴跌。"}
+        self.assertEqual([t["key"] for t in security.match(holo, targets, T, True)], [])
+        other = {"title": "某 DeFi 协议遭黑客攻击", "text": "某 DeFi 协议遭黑客攻击\n该协议部署在 Mantle 上，损失约 200 万美元。"}
+        self.assertEqual([t["key"] for t in security.match(other, targets, T, True)], [])
+        self.assertEqual(m("Mantle 遭黑客攻击，跨链桥损失 3000 万美元"), ["own:mantle"])
+        self.assertEqual(m("Mantle hacked: attacker drains bridge"), ["own:mantle"])
+        self.assertEqual(m("Hackers drain Mantle bridge for $30M"), ["own:mantle"])
         self.assertNotIn("own:unitas", [t["key"] for t in targets])
         # TGE: Unitas Season 2 — свої ключові слова
         p = cfg["tge"]["projects"]["unitas"]
