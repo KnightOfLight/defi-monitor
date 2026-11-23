@@ -142,6 +142,16 @@ def farm_shares(state: dict) -> dict[str, float]:
     return out
 
 
+def used_deps(cfg: dict, state: dict) -> set[str]:
+    """Dependencies some current project stands on (+ infiniFi farms ≥ 0.5%). Only these are measured:
+    a dependency left over from a dropped project (Unitas → Jupiter, USD1…) must not raise alerts."""
+    used: set[str] = set()
+    for p in projects(cfg).values():
+        used |= set((p.get("deps") or {}).keys())
+    used |= {k for k, v in farm_shares(state).items() if v >= 0.5}
+    return used
+
+
 def news_targets(cfg: dict, state: dict) -> list[dict]:
     """Everything worth matching in hack news: own projects first, then dependencies in use."""
     out = []
@@ -321,7 +331,8 @@ class Onchain:
                                           f"пояснення в каналах проєкту.{note}\n{link}",
                                   "recovery": f"🛡 {esc(label)}: {esc(flag)} знову false."})
         if "rate" in values and old.get("rate") and not first:
-            tol = float((self.T.get("rate") or {}).get("drop_tolerance", 1e-6))
+            pct = (c.get("rate") or {}).get("drop_tolerance_pct")
+            tol = float(pct) / 100 if pct is not None else float((self.T.get("rate") or {}).get("drop_tolerance", 1e-6))
             if values["rate"] < old["rate"] * (1 - tol):
                 self.findings.append({"type": "event", "level": "alarm", "text":
                     f"🛡 <b>{esc(label)}</b>: курс частки <b>впав</b> {fmt.rate(old['rate'])} → "
@@ -361,8 +372,8 @@ class Onchain:
 # --------------------------------------------------------------------------
 # 2. dependencies, measured
 # --------------------------------------------------------------------------
-def stable_prices(cfg: dict, session) -> dict[str, float]:
-    coins = {k: d["coin"] for k, d in deps(cfg).items() if d.get("coin")}
+def stable_prices(cfg: dict, session, only: set[str] | None = None) -> dict[str, float]:
+    coins = {k: d["coin"] for k, d in deps(cfg).items() if d.get("coin") and (only is None or k in only)}
     if not coins:
         return {}
     url = (S(cfg).get("coins_url") or "https://coins.llama.fi") + "/prices/current/" + ",".join(coins.values())
@@ -435,7 +446,7 @@ class Measured:
     def run(self) -> None:
         # stablecoins every run — one request
         try:
-            self.prices = stable_prices(self.cfg, self.session)
+            self.prices = stable_prices(self.cfg, self.session, used_deps(self.cfg, self.state))
             self.st["prices"] = {k: round(v, 6) for k, v in self.prices.items()}
         except Exception as e:
             self.errors["sec:stablecoins"] = f"DefiLlama coins: {e}"
@@ -452,8 +463,9 @@ class Measured:
         # «source not responding» counter (per run) sees a persistent failure as persistent
         if _due(self.st, "tvl_at", float(self.T.get("tvl_check_hours", 1)), self.now):
             bad = []
+            used = used_deps(self.cfg, self.state)
             for k, d in deps(self.cfg).items():
-                if not d.get("llama"):
+                if not d.get("llama") or k not in used:
                     continue
                 try:
                     v = llama_tvl(self.cfg, d["llama"], self.session)
@@ -468,8 +480,14 @@ class Measured:
             self.errors["sec:dep_tvl"] = self.st["tvl_error"]
         V = self.T.get("dep_tvl") or {}
         window = timedelta(hours=float(V.get("window_hours", 6)))
+        used = used_deps(self.cfg, self.state)
         for k, hist in self.st["tvl"].items():
             if k not in deps(self.cfg) or not hist:
+                continue
+            if k not in used:                        # залежність більше ніхто не використовує — мовчимо
+                st_a = (self.state.get("alerts") or {}).get(f"sec_tvl_{k}")
+                if st_a and st_a.get("active"):
+                    st_a.update(active=False, level=None)
                 continue
             recent = [h[1] for h in hist if (parse_iso(h[0]) or self.now) >= self.now - window]
             cur = hist[-1][1]

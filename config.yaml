@@ -384,7 +384,6 @@ security:
         fireblocks: "MPC-гаманці Saturn (2-of-3)"
         chainlink: "ціновий фід STRC для NAV sUSDat"
         curve: "пули USDC/USDat і USDC/sUSDat — вихід"
-        pancakeswap: "пули USDat/sUSDat на BNB Chain"
         pendle: "ринки Saturn на Pendle"
       contracts:
         - {label: USDat, address: "0x23238f20b894f29041f48D88eE91131C395Aaa71", supply: true}
@@ -441,7 +440,11 @@ security:
         - {label: SystemConfig, address: "0x427Ea0710FA5252057F0D88274f7aeb308386cAf"}
         - {label: ProxyAdmin, address: "0xca35F8338054739D138884685e08b39EE2217794", note: "Хто може оновлювати контракти моста."}
         - {label: mETH Staking, address: "0xe3cBd06D7dadB3F4e6557bAb7EdD924CD1489E8f",
-           rate: {getter: "mETHToETH(uint256)", unit: 18}, note: "Курс mETH→ETH у нормі лише росте; падіння — slashing або збиток."}
+           # курс = totalControlled / supply; між оновленнями оракула (баланси валідаторів), виплатами з черги і
+           # буфером ліквідності він може на мить «тремтіти» на тисячні частки відсотка (23.11: −0.0002%, за
+           # кілька годин — вище, ніж до падіння). Тривога — лише від −0.01% (~23 ETH із ~233 тис.)
+           rate: {getter: "mETHToETH(uint256)", unit: 18, drop_tolerance_pct: 0.01},
+           note: "Курс mETH→ETH у нормі лише росте; падіння від 0.01% — slashing або збиток (зокрема в позиціях буфера ліквідності)."}
         - {label: mETH, address: "0xd5F7838F5C461fefF7FE49ea5ebaF7728bB0ADfa", supply: true}
         - {label: mETH Pauser, address: "0x29Ab878aEd032e2e2c86FF4A9a9B05e3276cf1f8",
            flags: ["isStakingPaused()", "isUnstakeRequestsAndClaimsPaused()"]}

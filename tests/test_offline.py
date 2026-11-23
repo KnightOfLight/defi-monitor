@@ -1165,5 +1165,63 @@ class TestPortfolioV13(unittest.TestCase):
         self.assertTrue(tge.hits(title, p["aliases"]) and tge.hits(title, kws))
 
 
+# --------------------------------------------------------------------------
+class TestNoiseFixes1123(unittest.TestCase):
+    """23.11.2026: mETH −0.0002% і TVL PancakeSwap (залежність, яку ніхто більше не використовує по суті)."""
+
+    def test_meth_micro_dip_is_not_a_loss(self):
+        cfg = load_config()
+        staking = "0x" + "e3" * 20
+        meth = next(c for c in cfg["security"]["projects"]["mantle"]["contracts"] if c["label"] == "mETH Staking")
+        self.assertEqual(meth["rate"]["drop_tolerance_pct"], 0.01)
+        cfg["security"]["projects"] = {"mantle": {"name": "Mantle", "aliases": [], "deps": {}, "contracts": [
+            dict(meth, address=staking)]}}
+        v = {"rate": 1_103_309_000_000_000_000}
+
+        def run(now):
+            ch = FakeChain({(staking, "mETHToETH(uint256)" + format(10 ** 18, "064x")): word(v["rate"])})
+            eng = alerts.AlertEngine(cfg, st, now)
+            o = security.Onchain(cfg, st, now, {"ethereum": ch})
+            o.run()
+            security.apply(eng, o.findings, st)
+            return eng.messages
+        st = fresh_state(T0 - timedelta(days=30))
+        run(T0)
+        v["rate"] = 1_103_306_000_000_000_000                       # −0.0002% (реальний випадок 23.11)
+        self.assertEqual(run(T0 + timedelta(minutes=15)), [])
+        v["rate"] = 1_102_500_000_000_000_000                       # −0.07% — уже збиток
+        self.assertTrue(any("курс частки <b>впав</b>" in x for x in run(T0 + timedelta(minutes=30))))
+
+    def test_only_used_dependencies_are_measured(self):
+        cfg = load_config()
+        used = security.used_deps(cfg, fresh_state(T0))
+        self.assertNotIn("pancakeswap", used)                       # Saturn: пули на BNB — не потрібні
+        self.assertNotIn("jupiter", used)                           # лишилось від Unitas
+        self.assertNotIn("usd1", used)
+        self.assertIn("pendle", used)
+        asked = []
+
+        class Rec:
+            def get(self, url, **kw):
+                asked.append(url)
+                if "coins.llama.fi" in url:
+                    return FakeResp(json.dumps({"coins": {}}))
+                return FakeResp("1000000000")
+        st = fresh_state(T0)
+        security.Measured(cfg, st, T0, Rec(), {}).run()
+        self.assertFalse(any("pancakeswap" in u or "jupiter" in u for u in asked))
+        self.assertTrue(any("/tvl/pendle" in u for u in asked))
+        self.assertFalse(any("usd1" in u for u in asked if "coins.llama.fi" in u))
+        # стара активна тривога по залежності, яку прибрали, гаситься без повідомлення
+        st["security"]["tvl"]["pancakeswap"] = [[storage.iso(T0 - timedelta(hours=5)), 9.5e8], [storage.iso(T0), 5.9e8]]
+        st["alerts"]["sec_tvl_pancakeswap"] = {"active": True, "level": "warn", "since": storage.iso(T0), "last_sent": storage.iso(T0)}
+        eng = alerts.AlertEngine(cfg, st, T0 + timedelta(minutes=15))
+        mm = security.Measured(cfg, st, T0 + timedelta(minutes=15), Rec(), {})
+        mm.run()
+        security.apply(eng, mm.findings, st)
+        self.assertFalse(any("PancakeSwap" in x for x in eng.messages))
+        self.assertFalse(st["alerts"]["sec_tvl_pancakeswap"]["active"])
+
+
 if __name__ == "__main__":
     unittest.main()

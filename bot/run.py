@@ -346,8 +346,9 @@ def cmd_selftest(args) -> int:
 
         def _stables():
             import requests as _rq
-            got = security.stable_prices(cfg, _rq.Session())
-            want = [k for k, d in SEC.get("deps", {}).items() if d.get("coin")]
+            used = security.used_deps(cfg, {})
+            got = security.stable_prices(cfg, _rq.Session(), used)
+            want = [k for k, d in SEC.get("deps", {}).items() if d.get("coin") and k in used]
             miss = [k for k in want if k not in got]
             res = ", ".join(f"{k} {v:.4f}" for k, v in got.items())
             if miss:
@@ -358,8 +359,9 @@ def cmd_selftest(args) -> int:
         import requests as _rq
         _s = _rq.Session()
         bad_slugs, ok_slugs = [], []
+        used = security.used_deps(cfg, {})
         for k, d in SEC.get("deps", {}).items():
-            if d.get("llama"):
+            if d.get("llama") and k in used:
                 try:
                     ok_slugs.append(f"{d['llama']} {security.llama_tvl(cfg, d['llama'], _s) / 1e6:.0f}M")
                 except Exception as e:
