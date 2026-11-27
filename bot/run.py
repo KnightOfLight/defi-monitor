@@ -257,6 +257,30 @@ def cmd_selftest(args) -> int:
                 + _which("trusd", c))
     check("Curve frxUSD/trUSD", _curve_trusd)
 
+    def _fluid_trusd():
+        res = []
+        if E.get("fluid_trusd_dex"):
+            q = sources.fluid_dex_quote(eth, E["fluid_dex_resolver"], E["fluid_trusd_dex"], E["trusd_token"],
+                                        src["probe_amounts"].get("trusd", 1000))
+            res.append(f"пул з config: продаж 1000 trUSD → {q['price']:.5f} {q['symbol_out']}")
+        found = sources.fluid_dex_pools_with(eth, E["fluid_dex_resolver"], E["trusd_token"])
+        for f in found:
+            try:
+                q = sources.fluid_dex_quote(eth, E["fluid_dex_resolver"], f["pool"], E["trusd_token"], 1000)
+                res.append(f"{f['pool']} trUSD/{q['symbol_out']}: {q['price']:.5f}")
+            except Exception as e:
+                res.append(f"{f['pool']}: {e}")
+        if not found:
+            res.append("пулів trUSD у Fluid DEX T1 не знайдено")
+        return "; ".join(res)
+    if E.get("fluid_dex_resolver"):
+        check("Fluid DEX trUSD", _fluid_trusd, soft=True)
+
+    def _gt_trusd():
+        top = sources.geckoterminal_token_pools(src["geckoterminal"]["base_url"], "eth", E["trusd_token"])[:5]
+        return "; ".join(f"{p['dex']} {p['name']} {p['address']} ${p['reserve_usd']:,.0f}" for p in top)
+    check("Пули trUSD (GeckoTerminal)", _gt_trusd, soft=True)
+
     def _llama_coin():
         p = sources.defillama_coin_price(src["defillama"].get("coins_url", "https://coins.llama.fi"),
                                          "ethereum", E["trusd_token"])

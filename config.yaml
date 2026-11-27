@@ -89,6 +89,9 @@ sources:
     trusd_token:       "0xd0580192E98eA6CEB9c7b6191Ed2E27560911697"
     strusd_token:      "0x280839980a7eD0D7717F64125fE241012E5F5815"   # Staked trUSD, ERC-4626, cooldown 7 дн
     curve_trusd_pool:  "0xd1d954bc94c843815ec7b8119f2de00af27fa6ff"   # Curve frxUSD/trUSD (ціна trUSD у frxUSD)
+    # Fluid DEX: тут основна ліквідність trUSD. Ціна = найкраща з Curve (якщо глибокий) і Fluid
+    fluid_dex_resolver: "0x05Bd8269A20C472b148246De20E6852091BF16Ff"  # DexReservesResolver (fluid-contracts-public)
+    fluid_trusd_dex:   ""                                             # пул trUSD/USDC — адресу показує self-test
     pendle_trusd_market: "0xfcf009cb3135da12a6eb1f73f3ee05392a7bc947" # Pendle trUSD 26NOV2026
     pendle_trusd_pt:   "0x7191878f1fe834b28f4d0cead0e4375b814c4abb"   # PT-trUSD-26NOV2026 (для self-test)
 

@@ -8,8 +8,8 @@ from fractions import Fraction
 
 import requests
 
-from .evm import (ZERO_ADDR, Chain, dec_addr, dec_addr_array, dec_int, dec_uint, enc_int, enc_string, enc_uint,
-                  is_zero, same_addr)
+from .evm import (ZERO_ADDR, Chain, dec_addr, dec_addr_array, dec_int, dec_uint, enc_addr, enc_int, enc_string,
+                  enc_uint, is_zero, same_addr)
 
 UA = {"User-Agent": "defi-monitor-bot/1.0 (+github actions)"}
 HTTP_TIMEOUT = 20
@@ -83,6 +83,36 @@ def defillama_protocol_info(base_url: str, slug: str) -> dict:
 # --------------------------------------------------------------------------
 # Curve stableswap pool (2 coins)
 # --------------------------------------------------------------------------
+def fluid_dex_pools_with(chain: Chain, resolver: str, token: str) -> list[dict]:
+    """Fluid DEX (T1) pools that contain `token`: [{pool, token0, token1}]. One call per pool — self-test only."""
+    out = []
+    for pool in dec_addr_array(chain.call(resolver, "getAllPoolAddresses()")):
+        r = chain.call(resolver, "getPoolTokens(address)", enc_addr(pool))
+        t0, t1 = dec_addr(r, 0), dec_addr(r, 1)
+        if same_addr(t0, token) or same_addr(t1, token):
+            out.append({"pool": pool, "token0": t0, "token1": t1})
+    return out
+
+
+def fluid_dex_quote(chain: Chain, resolver: str, dex: str, token_in: str, amount: float) -> dict:
+    """Sell `amount` of token_in into a Fluid DEX pool (simulated via the resolver's estimateSwapIn).
+    Price = what you get per 1 token_in, in the other token (assumed ≈ $1 stable)."""
+    r = chain.call(resolver, "getPoolTokens(address)", enc_addr(dex))
+    t0, t1 = dec_addr(r, 0), dec_addr(r, 1)
+    if same_addr(t0, token_in):
+        zero_to_one, t_out = True, t1
+    elif same_addr(t1, token_in):
+        zero_to_one, t_out = False, t0
+    else:
+        raise RuntimeError(f"Токен {token_in} не знайдено в пулі Fluid {dex} ({t0}, {t1})")
+    d_in, d_out = chain.decimals(token_in), chain.decimals(t_out)
+    raw = chain.uint(resolver, "estimateSwapIn(address,bool,uint256,uint256)", enc_addr(dex),
+                     enc_uint(1 if zero_to_one else 0), enc_uint(int(round(amount)) * 10 ** d_in), enc_uint(0))
+    if raw <= 0:
+        raise RuntimeError(f"Fluid {dex}: estimateSwapIn повернув 0")
+    return {"price": raw / 10 ** d_out / amount, "token_out": t_out, "symbol_out": chain.symbol(t_out)}
+
+
 def curve_pool_state(chain: Chain, pool: str, target_token: str, probe_amount: float) -> dict:
     """Read a 2-coin Curve pool.
 

@@ -6,7 +6,7 @@ import time
 
 import requests
 
-from . import fmt, sources
+from . import fmt, portfolio, sources
 from .evm import Chain
 
 # Flat metric keys stored in history.csv (order matters for the CSV header).
@@ -45,37 +45,56 @@ def collect(cfg: dict) -> tuple[dict, dict]:
     E, B = src["ethereum"], src.get("bsc") or {}
     probes = src.get("probe_amounts", {})
 
-    # --- own stablecoins: Curve pool if it is deep enough, else DefiLlama aggregate ----------
+    # --- own stablecoins: the best price you can actually sell 1000 at -----------------------
+    # Кандидати: Curve-пул, якщо в ньому ≥ min_pool_liquidity_usd, і пул Fluid DEX (якщо вказано
+    # fluid_<asset>_dex). Ціна = найкраща з них. Немає жодного → агрегована ціна DefiLlama.
     # 27.11: LPs left Curve frxUSD/trUSD ($1.07 млн → $26 тис., 95% trUSD) — продаж 1000 trUSD у такий пул
-    # дав $0.886, хоча на Fluid trUSD коштував $0.999. Тонкий пул — не ціна ринку.
+    # дав $0.886, хоча на Fluid trUSD коштував ~$0.999. Тонкий пул — не ціна ринку.
     min_liq = src.get("min_pool_liquidity_usd") or {}
     coins_url = dl.get("coins_url", "https://coins.llama.fi")
     pools = [("usdat", "curve_usdat_pool", "usdat_token", "Curve USDC/USDat", None),
              ("iusd", "curve_iusd_pool", "iusd_token", "Curve iUSD/USDC", "curve_iusd_liquidity"),
              ("trusd", "curve_trusd_pool", "trusd_token", "Curve frxUSD/trUSD", "trusd_pool_liquidity")]
     for key, pool_k, tok_k, label, liq_key in pools:
-        if not (E.get(pool_k) and E.get(tok_k)):
+        if not E.get(tok_k):
             continue
-        c = None
-        try:
-            c = sources.curve_pool_state(eth, E[pool_k], E[tok_k], probes.get(key, 1000))
-            if liq_key:
-                m[liq_key] = c["liquidity_usd"]
-        except Exception as e:
-            errors[f"curve_{key}"] = f"{label}: {e}"
-        need = float(min_liq.get(key, min_liq.get("default", 100_000)))
-        if c is not None and c["liquidity_usd"] >= need:
-            m[f"price_{key}"] = c["price"]
-            m[f"src_{key}"] = label
+        amount = probes.get(key, 1000)
+        quotes, thin = [], None
+        if E.get(pool_k):
+            try:
+                c = sources.curve_pool_state(eth, E[pool_k], E[tok_k], amount)
+                if liq_key:
+                    m[liq_key] = c["liquidity_usd"]
+                need = float(min_liq.get(key, min_liq.get("default", 100_000)))
+                if c["liquidity_usd"] >= need:
+                    quotes.append((c["price"], label))
+                else:
+                    thin = (c["price"], label, c["liquidity_usd"])
+            except Exception as e:
+                errors[f"curve_{key}"] = f"{label}: {e}"
+        if E.get(f"fluid_{key}_dex") and E.get("fluid_dex_resolver"):
+            try:
+                q = sources.fluid_dex_quote(eth, E["fluid_dex_resolver"], E[f"fluid_{key}_dex"], E[tok_k], amount)
+                quotes.append((q["price"], f"Fluid {portfolio.ASSETS[key][0]}/{q['symbol_out']}"))
+            except Exception as e:
+                errors[f"fluid_{key}"] = f"Fluid DEX {key}: {e}"
+        if quotes:
+            p, where = max(quotes)
+            m[f"price_{key}"] = p
+            m[f"src_{key}"] = where + (f" (продаж {amount:g}; ще: " + ", ".join(f"{w} {x:.4f}" for x, w in quotes
+                                                                                 if w != where) + ")"
+                                       if len(quotes) > 1 else "")
+            if thin:
+                m[f"src_{key}"] += f"; {thin[1]} тонкий ({fmt.money(thin[2], 0)}): {thin[0]:.4f}"
             continue
-        try:                                   # тонкий / недоступний пул → агрегована ціна ринку
+        try:                                   # тонкі / недоступні пули → агрегована ціна ринку
             m[f"price_{key}"] = sources.defillama_coin_price(coins_url, "ethereum", E[tok_k], session)
-            m[f"src_{key}"] = ("DefiLlama (агрегована ціна; " + (f"{label} тонкий — {fmt.money(c['liquidity_usd'], 0)}, "
-                               f"там {c['price']:.4f})" if c is not None else f"{label} недоступний)"))
+            m[f"src_{key}"] = ("DefiLlama (агрегована ціна; " + (f"{thin[1]} тонкий — {fmt.money(thin[2], 0)}, "
+                               f"там {thin[0]:.4f})" if thin else "пули недоступні)"))
         except Exception as e2:
-            if c is not None:                  # краще ціна тонкого пулу з поміткою, ніж нічого
-                m[f"price_{key}"] = c["price"]
-                m[f"src_{key}"] = f"{label} (тонкий пул {fmt.money(c['liquidity_usd'], 0)} — ціна неточна)"
+            if thin:                           # краще ціна тонкого пулу з поміткою, ніж нічого
+                m[f"price_{key}"] = thin[0]
+                m[f"src_{key}"] = f"{thin[1]} (тонкий пул {fmt.money(thin[2], 0)} — ціна неточна)"
             errors[f"price_{key}"] = f"DefiLlama coins {key}: {e2}"
 
     # --- PancakeSwap V3 USDu/USDT (лише якщо USDu у config) ------------------

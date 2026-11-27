@@ -1271,5 +1271,35 @@ class TestThinPool1127(unittest.TestCase):
                 setattr(sources, k, v)
 
 
+    def test_best_quote_wins_over_thin_pool(self):
+        """Fluid дає 0.9991, Curve тонкий 0.8857 → ціна 0.9991 з Fluid; DefiLlama не потрібна."""
+        from bot import metrics
+        cfg = load_config()
+        cfg["sources"]["defillama"]["slugs"] = {}
+        cfg["security"]["enabled"] = False
+        cfg["sources"]["ethereum"]["fluid_trusd_dex"] = "0x" + "ab" * 20
+        saved = {k: getattr(sources, k) for k in ("curve_pool_state", "defillama_coin_price", "tori_state",
+                                                  "pendle_market_state", "infinifi_state", "fluid_dex_quote")}
+        try:
+            sources.curve_pool_state = lambda ch, pool, tok, amt: {"price": 0.8857, "liquidity_usd": 25_650}
+            sources.defillama_coin_price = lambda *a, **kw: (_ for _ in ()).throw(AssertionError("не треба"))
+            sources.fluid_dex_quote = lambda ch, res, dex, tok, amt: {"price": 0.9991, "symbol_out": "USDC"}
+            for k in ("tori_state", "pendle_market_state", "infinifi_state"):
+                setattr(sources, k, lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("skip")))
+            m, err = metrics.collect(cfg)
+            self.assertEqual(m["price_trusd"], 0.9991)
+            self.assertTrue(m["src_trusd"].startswith("Fluid trUSD/USDC"), m["src_trusd"])
+            self.assertIn("тонкий", m["src_trusd"])
+            # Fluid недоступний → назад до DefiLlama, помилка Fluid записана
+            sources.fluid_dex_quote = lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("revert"))
+            sources.defillama_coin_price = lambda *a, **kw: 0.9993
+            m, err = metrics.collect(cfg)
+            self.assertEqual(m["price_trusd"], 0.9993)
+            self.assertIn("fluid_trusd", err)
+        finally:
+            for k, v in saved.items():
+                setattr(sources, k, v)
+
+
 if __name__ == "__main__":
     unittest.main()

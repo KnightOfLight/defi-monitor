@@ -60,6 +60,10 @@ SEL = {
     "mETHToETH(uint256)": "0x5890c11c",
     "isStakingPaused()": "0x1ea7ca89",
     "isUnstakeRequestsAndClaimsPaused()": "0x8b61391a",
+    # Fluid DEX T1 — DexReservesResolver (fluid-contracts-public, periphery/resolvers/dexReserves)
+    "getAllPoolAddresses()": "0xc56f1b44",
+    "getPoolTokens(address)": "0xca4f2803",
+    "estimateSwapIn(address,bool,uint256,uint256)": "0xbb39e3a1",   # симуляція swapIn через revert, лише eth_call
 }
 ZERO_ADDR = "0x" + "0" * 40
 
