@@ -6,7 +6,7 @@
     python tools/find_pools.py eth 0xd0580192E98eA6CEB9c7b6191Ed2E27560911697   # trUSD (Tori)
 
 Pick the top Curve/PancakeSwap pool against a stablecoin and put its address into config.yaml
-(the bot reads Curve stableswap and Uniswap/PancakeSwap V3 pools; Fluid DEX pools are not supported).
+(the bot reads Curve stableswap, Uniswap/PancakeSwap V3 and Fluid DEX T1 pools — Fluid: fluid_<asset>_dex).
 """
 import sys
 from pathlib import Path

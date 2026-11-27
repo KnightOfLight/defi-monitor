@@ -28,7 +28,7 @@ ASSET_ADVICE = {
             "app.unitas.so або продати на PancakeSwap.",
     "iusd": "Пул дуже тонкий — звірте з курсом погашення в протоколі (/status) і rate liUSD: чи це slashing.",
     "trusd": "Погашення напряму в Tori — лише для whitelisted; звичайний вихід — DEX (Fluid trUSD/USDC, Curve "
-             "frxUSD/trUSD) або продаж PT / зняття LP на Pendle. Перевірте @tori_finance і "
+             "frxUSD/trUSD). Перевірте @tori_finance і "
              "tori.accountable.capital (proof of reserves), а також курс strUSD у /status.",
 }
 PROTO_NAMES = {"saturn": "Saturn", "unitas": "Unitas", "infinifi": "InfiniFi", "tori": "Tori"}
@@ -96,6 +96,7 @@ class AlertEngine:
         self._maturity(metrics)
         self._new_markets()
         self._tori(metrics)
+        self._exit_routes(metrics)
         self._infinifi(metrics)
         self._sources(errors)
         return self.messages
@@ -315,6 +316,23 @@ class AlertEngine:
                         f"trUSD: {fmt.price(m.get('price_trusd'))} · PT-trUSD: {fmt.rate(m.get('pendle_pt_price'))}. "
                         f"Перевірте @tori_finance і tori.accountable.capital; якщо збиток повториться завтра — "
                         f"це вже не разовий епізод.")
+
+    # --- exit routes: the deepest DEX pool of an own stablecoin is paused ----------------
+    def _exit_routes(self, m: dict) -> None:
+        for asset, name in portfolio.assets(self.cfg).items():
+            paused = m.get(f"fluid_{asset}_paused")
+            if paused is None:
+                continue
+            curve = m.get(f"curve_{asset}_price")
+            text = (f"⏸ Пул <b>Fluid {esc(name)}/USDC</b> — свопи на паузі. Це основна ліквідність {esc(name)}, тож "
+                    f"вийти з {esc(name)} через DEX зараз можна лише через тонкі пули Curve"
+                    + (f" (продаж 1000 там дає {fmt.price(curve)})" if curve else "") + ".\n"
+                    f"Ринкова ціна {esc(name)} для тривог: {fmt.price(m.get(f'price_{asset}'))} "
+                    f"({esc(m.get(f'src_{asset}') or '—')}).\n"
+                    f"Пауза на боці Fluid, а не емітента: забезпечення {esc(name)} це не зачіпає. Не продавайте в тонкий пул "
+                    "без потреби — дочекайтеся відновлення свопів (@0xfluid). Бот повідомить, коли пул відкриється.")
+            self._fire(f"exit_fluid_{asset}", "price", "warn" if paused else None, text,
+                       f"Пул Fluid {esc(name)}/USDC — свопи знову працюють, вихід з {esc(name)} через DEX відкритий.")
 
     # --- InfiniFi ------------------------------------------------------
     def _infinifi(self, m: dict) -> None:

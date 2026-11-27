@@ -581,6 +581,15 @@ def _hit_in(s: str, t: dict, kws: list[str], strong: list[str]) -> bool:
     return any(_strict_hit(s, a, strong + extra) for a in t.get("strict_aliases") or [])
 
 
+def _own_pause_hit(s: str, t: dict, own_kws: list[str]) -> bool:
+    """«Fluid pauses DEX swaps», «USDat paused minting» — назва ПЕРЕД словом (хто зупиняє),
+    а не «Hyperliquid pauses deposits after Fluid DEX integration»."""
+    names = list(t["aliases"]) + list(t.get("strict_aliases") or [])
+    if t.get("cjk_aliases") and _CJK.search(s):
+        names += list(t["cjk_aliases"])
+    return any(_strict_hit(s, a, own_kws) for a in names)
+
+
 def match(item: dict, targets: list[dict], T: dict, scope_full: bool) -> list[dict]:
     """Where the words must meet:
     * a dependency — only in the headline (RSS title / first line of a Telegram post): a long post that mentions
@@ -593,6 +602,7 @@ def match(item: dict, targets: list[dict], T: dict, scope_full: bool) -> list[di
         return []
     kws = [str(k) for k in T.get("hack_keywords", [])]
     strong = [str(k) for k in T.get("strong_keywords", [])]
+    own_kws = [str(k) for k in T.get("own_keywords", [])]       # «pauses», «halts» — лише для власних проєктів
     unaffected = [str(k) for k in T.get("unaffected_keywords", [])]
     body = sentences(item["text"]) if scope_full else []
     out = []
@@ -600,6 +610,8 @@ def match(item: dict, targets: list[dict], T: dict, scope_full: bool) -> list[di
         scopes = [c for x in [head] + (body if t["own"] else []) for c in clauses(x)]
         scopes = [x for x in scopes if not tge.hits(x, list(t.get("exclude") or []) + unaffected)]
         if any(_hit_in(x, t, kws, strong) for x in scopes):
+            out.append(t)
+        elif t["own"] and own_kws and any(_own_pause_hit(x, t, own_kws) for x in scopes):
             out.append(t)
     own = [t for t in out if t["own"]]
     return own or out
@@ -678,10 +690,12 @@ class HackNews:
             out.append((f"gnews:{i}", lambda q=q: tge.google_news(q, ascii_kws, 1, self.session), False, every))
         for i, q in enumerate(T.get("bing_queries") or []):
             out.append((f"bing:{i}", lambda q=q: tge.bing_news(q, self.session), False, slow))
-        for pk, p in ((self.cfg.get("tge") or {}).get("projects") or {}).items():
-            if p.get("news_query"):
-                out.append((f"gnews:own:{pk}", lambda p=p: tge.google_news(p["news_query"], ascii_kws, 2, self.session),
-                            False, slow))
+        own_kws = ascii_kws + [k for k in S(self.cfg).get("own_keywords", []) if str(k).isascii()]
+        queries = {pk: p["news_query"] for pk, p in ((self.cfg.get("tge") or {}).get("projects") or {}).items()
+                   if p.get("news_query")}
+        queries.update({pk: p["news_query"] for pk, p in projects(self.cfg).items() if p.get("news_query")})
+        for pk, q in queries.items():
+            out.append((f"gnews:own:{pk}", lambda q=q: tge.google_news(q, own_kws, 2, self.session), False, slow))
         return [(k, fn, full) for k, fn, full, hours in out if _due(self.st["checked"], k, hours, self.now)]
 
     def run(self) -> list[str]:
@@ -742,7 +756,13 @@ class HackNews:
         return self.messages
 
     def _report(self, t: dict, items: list[dict], proof: str | None = None) -> str:
-        if t["own"]:
+        hack_kws = [str(k) for k in S(self.cfg).get("hack_keywords", [])]
+        if t["own"] and not any(tge.hits(it["title"], hack_kws) for it in items):
+            head = (f"⚠️ <b>УВАГА · {esc(t['name'])}: пауза / зупинка</b>\n"
+                    f"Новини: ваш протокол щось призупинив (слів «hack/exploit» у заголовку немає):")
+            tail = ("Що саме зупинено і чи це зачіпає вашу позицію — в офіційному акаунті проєкту. "
+                    "Не переходьте за «claim/withdraw»-лінками з коментарів. On-chain стан — /security, ціни — /status.")
+        elif t["own"]:
             head = (f"🚨 <b>ТРИВОГА · можливий злам: {esc(t['name'])}</b>\n"
                     f"Новини пов'язують ваш протокол зі зламом / атакою:")
             tail = ("До офіційної заяви: нічого не вносьте й не підписуйте, не переходьте за «claim/withdraw»-лінками "

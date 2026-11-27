@@ -91,7 +91,7 @@ sources:
     curve_trusd_pool:  "0xd1d954bc94c843815ec7b8119f2de00af27fa6ff"   # Curve frxUSD/trUSD (ціна trUSD у frxUSD)
     # Fluid DEX: тут основна ліквідність trUSD. Ціна = найкраща з Curve (якщо глибокий) і Fluid
     fluid_dex_resolver: "0x05Bd8269A20C472b148246De20E6852091BF16Ff"  # DexReservesResolver (fluid-contracts-public)
-    fluid_trusd_dex:   ""                                             # пул trUSD/USDC — адресу показує self-test
+    fluid_trusd_dex:   "0x97f32e5091d0e6aee24beb398e6592ae111dee9c"   # Fluid trUSD/USDC (~$2.6 млн, GeckoTerminal 27.11)
     pendle_trusd_market: "0xfcf009cb3135da12a6eb1f73f3ee05392a7bc947" # Pendle trUSD 26NOV2026
     pendle_trusd_pt:   "0x7191878f1fe834b28f4d0cead0e4375b814c4abb"   # PT-trUSD-26NOV2026 (для self-test)
 
@@ -280,6 +280,10 @@ security:
                   insolvency, depeg, depegs, depegged, depegging, "de-peg", draining, exploits, hacks,
                   "withdrawals paused", "paused withdrawals",
                   被盗, 被黑, 黑客, 攻击, 遭攻击, 漏洞, 脱锚, 安全事件, 盗取, 异常交易]
+  # Лише для ВАШИХ проєктів: пауза / зупинка теж важлива, навіть без слова «hack».
+  # 26.11: «Fluid Pauses DEX Swaps After Security Review» бот пропустив — не було ні цих слів, ні запиту про Fluid
+  own_keywords: [pause, pauses, paused, pausing, suspend, suspends, suspended, halt, halts, halted, freeze, freezes,
+                 frozen, "security review", emergency, 暂停, 冻结, 紧急]
   # заголовок про захист, а не про інцидент — пропускаємо
   ignore_keywords: [漏洞赏金, "bug bounty", 防范, 防止, 预防, 防御, 演练, prevent, prevents, "protect against",
                     "protects against", safeguard, safeguards, drill,
@@ -420,6 +424,8 @@ security:
       aliases: ["Fluid DEX", "Fluid protocol", "Fluid Lending", "Fluid Finance", "Fluid vault", "Fluid vaults",
                 Instadapp, fUSDC, fUSDT]
       cjk_aliases: [Fluid]
+      strict_aliases: [Fluid]   # голе «Fluid» — лише «Fluid pauses / Fluid hacked …» (слово одразу після назви)
+      news_query: '("Fluid" OR "Instadapp") (DeFi OR DEX OR protocol OR crypto)'
       exclude: ["remains fluid", "fluid situation", "stays fluid", "situation is fluid"]
       deps:
         usdc: "основний актив lending (fUSDC) і пар DEX"
@@ -436,6 +442,7 @@ security:
       name: Mantle
       aliases: ["Mantle Network", "Mantle bridge", "Mantle chain", "mETH Protocol", mETH, cmETH, "Mantle LSP"]
       strict_aliases: [Mantle, 曼特尔]   # голе «Mantle» — лише «Mantle hacked / Mantle 遭攻击», не «токен X на Mantle»
+      news_query: '("Mantle Network" OR "mETH Protocol" OR "Mantle bridge" OR "Mantle" mETH)'
       exclude: ["takes up the mantle", "take up the mantle", "taking up the mantle", "mantle of", fireplace]
       deps:
         bybit: "біржа, тісно пов'язана з Mantle (у лютому 2025 серед викраденого з Bybit були mETH і cmETH)"

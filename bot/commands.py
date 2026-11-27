@@ -143,7 +143,9 @@ def status_text(ctx: Ctx) -> str:
     for a, name in portfolio.assets(ctx.cfg).items():
         src_ = m.get(f"src_{a}")
         lines.append(f"{name}: <b>{fmt.price(m.get(f'price_{a}'))}</b> — {lv[f'price_{a}']}{extra.get(a, '')}"
-                     + (f"\n  <i>джерело: {esc(src_)}</i>" if src_ and src_.startswith("DefiLlama") else ""))
+                     + (f"\n  <i>джерело: {esc(src_)}</i>" if src_ else ""))
+        if m.get(f"fluid_{a}_paused"):
+            lines.append(f"  ⏸ Fluid {name}/USDC: свопи на паузі — вихід лише через тонкі пули Curve")
     lines.append("")
     lines.append("<b>TVL (DefiLlama)</b>")
     for p, name in portfolio.protocols(ctx.cfg).items():

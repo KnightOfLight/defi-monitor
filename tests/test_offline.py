@@ -1301,5 +1301,65 @@ class TestThinPool1127(unittest.TestCase):
                 setattr(sources, k, v)
 
 
+# --------------------------------------------------------------------------
+class TestFluidPause1127(unittest.TestCase):
+    """26.11: Fluid поставив свопи DEX на паузу — головний пул виходу з trUSD закритий, бот це пропустив."""
+
+    def test_pause_headlines_match_only_own_project_as_subject(self):
+        cfg = load_config()
+        targets = security.news_targets(cfg, {})
+        T = security.S(cfg)
+        hit = lambda t: [h["key"] for h in security.match({"title": t, "text": ""}, targets, T, False)]
+        self.assertEqual(hit("Fluid Pauses DEX Swaps After ‘Mythos 5.2’ Security Review"), ["own:fluid"])
+        self.assertEqual(hit("Fluid Temporarily Suspends Redemptions During Security Review"), ["own:fluid"])
+        self.assertEqual(hit("Tori Finance pauses trUSD redemptions"), ["own:tori"])
+        self.assertEqual(hit("Hyperliquid pauses deposits after Fluid DEX integration"), [])
+        self.assertEqual(hit("The situation remains fluid as Binance pauses withdrawals"), [])
+        self.assertEqual(hit("Lido pauses withdrawals"), [])
+
+    def test_pause_report_is_warning_not_hack(self):
+        cfg = load_config()
+        hn = security.HackNews(cfg, fresh_state(T0 - timedelta(days=30)), T0, None)
+        t = [x for x in security.news_targets(cfg, {}) if x["key"] == "own:fluid"][0]
+        it = {"title": "Fluid Pauses DEX Swaps After Security Review", "link": "https://x", "via": "gn", "ts": T0}
+        txt = hn._report(t, [it])
+        self.assertIn("пауза / зупинка", txt)
+        self.assertNotIn("можливий злам", txt)
+        it2 = dict(it, title="Fluid DEX exploited for $2M")
+        self.assertIn("можливий злам", hn._report(t, [it2]))
+
+    def test_own_project_news_queries(self):
+        cfg = load_config()
+        hn = security.HackNews(cfg, fresh_state(T0 - timedelta(days=30)), T0, None)
+        keys = [k for k, fn, full in hn.sources()]
+        for pk in ("fluid", "mantle", "tori", "saturn", "infinifi"):
+            self.assertIn(f"gnews:own:{pk}", keys)
+
+    def test_paused_exit_pool_alert_and_recovery(self):
+        cfg = load_config()
+        st = fresh_state(T0 - timedelta(days=30))
+        m = dict(base_metrics(price_trusd=0.9928), fluid_trusd_paused=True, curve_trusd_price=0.8689,
+                 src_trusd="DefiLlama (агрегована ціна; Curve frxUSD/trUSD тонкий — $23 431, там 0.8689)")
+        msgs = alerts.AlertEngine(cfg, st, T0).run(m, [], {})
+        txt = "\n".join(msgs)
+        self.assertIn("свопи на паузі", txt)
+        self.assertIn("0.8689", txt)
+        m2 = dict(base_metrics(price_trusd=0.9995), fluid_trusd_paused=False)
+        msgs = alerts.AlertEngine(cfg, st, T0 + timedelta(hours=1)).run(m2, [], {})
+        self.assertTrue(any("свопи знову працюють" in x for x in msgs))
+
+    def test_fluid_revert_decoding(self):
+        from bot.evm import RpcError
+
+        class C:
+            def __init__(s, msg): s.msg = msg
+            def _rpc(s, method, params): raise RpcError(s.msg)
+        ok = "x: {'code': 3, 'data': '0xb3bfda99" + format(999_100_000, "064x") + "'}"
+        self.assertEqual(sources._fluid_simulate_swap(C(ok), "0x" + "11" * 20, True, 10 ** 21), 999_100_000)
+        paused = "x: {'code': 3, 'data': '0x2fee3e0e" + format(51043, "064x") + "'}"
+        with self.assertRaisesRegex(RuntimeError, "SwapAndArbitragePaused"):
+            sources._fluid_simulate_swap(C(paused), "0x" + "11" * 20, True, 10 ** 21)
+
+
 if __name__ == "__main__":
     unittest.main()

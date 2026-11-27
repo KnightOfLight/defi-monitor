@@ -66,6 +66,7 @@ def collect(cfg: dict) -> tuple[dict, dict]:
                 if liq_key:
                     m[liq_key] = c["liquidity_usd"]
                 need = float(min_liq.get(key, min_liq.get("default", 100_000)))
+                m[f"curve_{key}_price"] = c["price"]
                 if c["liquidity_usd"] >= need:
                     quotes.append((c["price"], label))
                 else:
@@ -76,8 +77,12 @@ def collect(cfg: dict) -> tuple[dict, dict]:
             try:
                 q = sources.fluid_dex_quote(eth, E["fluid_dex_resolver"], E[f"fluid_{key}_dex"], E[tok_k], amount)
                 quotes.append((q["price"], f"Fluid {portfolio.ASSETS[key][0]}/{q['symbol_out']}"))
+                m[f"fluid_{key}_paused"] = False
             except Exception as e:
-                errors[f"fluid_{key}"] = f"Fluid DEX {key}: {e}"
+                if "SwapAndArbitragePaused" in str(e):
+                    m[f"fluid_{key}_paused"] = True    # не помилка джерела, а стан пулу — окремий алерт
+                else:
+                    errors[f"fluid_{key}"] = f"Fluid DEX {key}: {e}"
         if quotes:
             p, where = max(quotes)
             m[f"price_{key}"] = p
