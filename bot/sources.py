@@ -94,9 +94,40 @@ def fluid_dex_pools_with(chain: Chain, resolver: str, token: str) -> list[dict]:
     return out
 
 
+FLUID_SWAP_RESULT = "b3bfda99"      # error FluidDexSwapResult(uint256 amountOut)
+FLUID_DEX_ERROR = "2fee3e0e"        # error FluidDexError(uint256 errorId)
+FLUID_ERRORS = {51043: "свопи в пулі на паузі (SwapAndArbitragePaused)",
+                51045: "сума впирається в ліміти пулу (SwapInLimitingAmounts)",
+                51009: "немає маршруту свопу (NoSwapRoute)",
+                51011: "вичерпано ліміт утилізації токена (UtilizationCapReached)",
+                51066: "оракул пулу неактивний"}
+ADDRESS_DEAD = "0x000000000000000000000000000000000000dEaD"
+
+
+def _fluid_simulate_swap(chain: Chain, dex: str, zero_to_one: bool, amount_raw: int) -> int:
+    """swapIn(..., to=0x…dEaD) on the pool itself: Fluid reverts with FluidDexSwapResult(amountOut)."""
+    import re
+    from .evm import SEL, RpcError
+    data = (SEL["swapIn(bool,uint256,uint256,address)"] + enc_uint(1 if zero_to_one else 0)
+            + enc_uint(amount_raw) + enc_uint(0) + enc_addr(ADDRESS_DEAD))
+    try:
+        chain._rpc("eth_call", [{"to": dex, "data": data, "from": ADDRESS_DEAD}, "latest"])
+    except RpcError as e:
+        msg = str(e)
+        m = re.search(r"0x" + FLUID_SWAP_RESULT + r"([0-9a-fA-F]{64})", msg)
+        if m:
+            return int(m.group(1), 16)
+        m = re.search(r"0x" + FLUID_DEX_ERROR + r"([0-9a-fA-F]{64})", msg)
+        if m:
+            code = int(m.group(1), 16)
+            raise RuntimeError(f"Fluid {dex[:10]}…: {FLUID_ERRORS.get(code, f'FluidDexError {code}')}")
+        raise
+    raise RuntimeError(f"Fluid {dex[:10]}…: симуляція свопу не повернула результат")
+
+
 def fluid_dex_quote(chain: Chain, resolver: str, dex: str, token_in: str, amount: float) -> dict:
-    """Sell `amount` of token_in into a Fluid DEX pool (simulated via the resolver's estimateSwapIn).
-    Price = what you get per 1 token_in, in the other token (assumed ≈ $1 stable)."""
+    """Sell `amount` of token_in into a Fluid DEX pool (simulated: pool's swapIn to 0x…dEaD, then the
+    resolver's estimateSwapIn). Price = what you get per 1 token_in, in the other token (≈ $1 stable)."""
     r = chain.call(resolver, "getPoolTokens(address)", enc_addr(dex))
     t0, t1 = dec_addr(r, 0), dec_addr(r, 1)
     if same_addr(t0, token_in):
@@ -106,10 +137,16 @@ def fluid_dex_quote(chain: Chain, resolver: str, dex: str, token_in: str, amount
     else:
         raise RuntimeError(f"Токен {token_in} не знайдено в пулі Fluid {dex} ({t0}, {t1})")
     d_in, d_out = chain.decimals(token_in), chain.decimals(t_out)
-    raw = chain.uint(resolver, "estimateSwapIn(address,bool,uint256,uint256)", enc_addr(dex),
-                     enc_uint(1 if zero_to_one else 0), enc_uint(int(round(amount)) * 10 ** d_in), enc_uint(0))
+    amount_raw = int(round(amount)) * 10 ** d_in
+    try:
+        raw = _fluid_simulate_swap(chain, dex, zero_to_one, amount_raw)
+    except RuntimeError as e:
+        if "Fluid" in str(e) and "симуляція" not in str(e):
+            raise                                      # пул прямо відповів помилкою (пауза, ліміти) — це і є відповідь
+        raw = chain.uint(resolver, "estimateSwapIn(address,bool,uint256,uint256)", enc_addr(dex),
+                         enc_uint(1 if zero_to_one else 0), enc_uint(amount_raw), enc_uint(0))
     if raw <= 0:
-        raise RuntimeError(f"Fluid {dex}: estimateSwapIn повернув 0")
+        raise RuntimeError(f"Fluid {dex[:10]}…: симуляція свопу повернула 0")
     return {"price": raw / 10 ** d_out / amount, "token_out": t_out, "symbol_out": chain.symbol(t_out)}
 
 

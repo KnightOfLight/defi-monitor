@@ -64,6 +64,7 @@ SEL = {
     "getAllPoolAddresses()": "0xc56f1b44",
     "getPoolTokens(address)": "0xca4f2803",
     "estimateSwapIn(address,bool,uint256,uint256)": "0xbb39e3a1",   # симуляція swapIn через revert, лише eth_call
+    "swapIn(bool,uint256,uint256,address)": "0x2668dfaa",           # пул Fluid DEX; to=0x…dEaD → revert з результатом
 }
 ZERO_ADDR = "0x" + "0" * 40
 
