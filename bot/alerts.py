@@ -119,10 +119,10 @@ class AlertEngine:
             name, pool = ASSET_NAMES[asset], ASSET_POOL[asset]
             if level == "alarm":
                 text = (f"{name} = <b>{fmt.price(p)}</b> — нижче порогу тривоги {fmt.price(alarm_below, 3)}\n"
-                        f"Джерело: {esc(pool)}\n{ASSET_ADVICE[asset]}")
+                        f"Джерело: {esc(m.get(f'src_{asset}') or pool)}\n{ASSET_ADVICE[asset]}")
             else:
                 text = (f"{name} = <b>{fmt.price(p)}</b> — нижче {fmt.price(P['warn_below'], 3)} "
-                        f"на {counters[key]} перевірках поспіль\nДжерело: {esc(pool)}\n"
+                        f"на {counters[key]} перевірках поспіль\nДжерело: {esc(m.get(f'src_{asset}') or pool)}\n"
                         f"Перевірте причину; тривога — при {fmt.price(alarm_below, 3)}.")
             self._fire(f"price_{asset}", "price", level, text,
                        f"{name} повернувся до норми: <b>{fmt.price(p)}</b>")

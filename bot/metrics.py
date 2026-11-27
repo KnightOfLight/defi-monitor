@@ -6,7 +6,7 @@ import time
 
 import requests
 
-from . import sources
+from . import fmt, sources
 from .evm import Chain
 
 # Flat metric keys stored in history.csv (order matters for the CSV header).
@@ -45,27 +45,38 @@ def collect(cfg: dict) -> tuple[dict, dict]:
     E, B = src["ethereum"], src.get("bsc") or {}
     probes = src.get("probe_amounts", {})
 
-    # --- USDat: price only (Curve USDC/USDat, sell 1000 USDat) --------------
-    try:
-        c = sources.curve_pool_state(eth, E["curve_usdat_pool"], E["usdat_token"], probes.get("usdat", 1000))
-        m["price_usdat"] = c["price"]
-    except Exception as e:
-        errors["curve_usdat"] = f"Curve USDC/USDat: {e}"
-        try:  # price-only fallback
-            g = sources.geckoterminal_pool(src["geckoterminal"]["base_url"], "eth",
-                                           E["curve_usdat_pool"], E["usdat_token"])
-            m["price_usdat"] = g["price"]
-            errors["curve_usdat"] += " (ціну взято з GeckoTerminal)"
+    # --- own stablecoins: Curve pool if it is deep enough, else DefiLlama aggregate ----------
+    # 27.11: LPs left Curve frxUSD/trUSD ($1.07 млн → $26 тис., 95% trUSD) — продаж 1000 trUSD у такий пул
+    # дав $0.886, хоча на Fluid trUSD коштував $0.999. Тонкий пул — не ціна ринку.
+    min_liq = src.get("min_pool_liquidity_usd") or {}
+    coins_url = dl.get("coins_url", "https://coins.llama.fi")
+    pools = [("usdat", "curve_usdat_pool", "usdat_token", "Curve USDC/USDat", None),
+             ("iusd", "curve_iusd_pool", "iusd_token", "Curve iUSD/USDC", "curve_iusd_liquidity"),
+             ("trusd", "curve_trusd_pool", "trusd_token", "Curve frxUSD/trUSD", "trusd_pool_liquidity")]
+    for key, pool_k, tok_k, label, liq_key in pools:
+        if not (E.get(pool_k) and E.get(tok_k)):
+            continue
+        c = None
+        try:
+            c = sources.curve_pool_state(eth, E[pool_k], E[tok_k], probes.get(key, 1000))
+            if liq_key:
+                m[liq_key] = c["liquidity_usd"]
+        except Exception as e:
+            errors[f"curve_{key}"] = f"{label}: {e}"
+        need = float(min_liq.get(key, min_liq.get("default", 100_000)))
+        if c is not None and c["liquidity_usd"] >= need:
+            m[f"price_{key}"] = c["price"]
+            m[f"src_{key}"] = label
+            continue
+        try:                                   # тонкий / недоступний пул → агрегована ціна ринку
+            m[f"price_{key}"] = sources.defillama_coin_price(coins_url, "ethereum", E[tok_k], session)
+            m[f"src_{key}"] = ("DefiLlama (агрегована ціна; " + (f"{label} тонкий — {fmt.money(c['liquidity_usd'], 0)}, "
+                               f"там {c['price']:.4f})" if c is not None else f"{label} недоступний)"))
         except Exception as e2:
-            errors["curve_usdat"] += f"; GeckoTerminal: {e2}"
-
-    # --- Curve iUSD/USDC (thin pool — price is indicative only) ------------
-    try:
-        c = sources.curve_pool_state(eth, E["curve_iusd_pool"], E["iusd_token"], probes.get("iusd", 100))
-        m["price_iusd"] = c["price"]
-        m["curve_iusd_liquidity"] = c["liquidity_usd"]
-    except Exception as e:
-        errors["curve_iusd"] = f"Curve iUSD/USDC: {e}"
+            if c is not None:                  # краще ціна тонкого пулу з поміткою, ніж нічого
+                m[f"price_{key}"] = c["price"]
+                m[f"src_{key}"] = f"{label} (тонкий пул {fmt.money(c['liquidity_usd'], 0)} — ціна неточна)"
+            errors[f"price_{key}"] = f"DefiLlama coins {key}: {e2}"
 
     # --- PancakeSwap V3 USDu/USDT (лише якщо USDu у config) ------------------
     if B.get("pancake_usdu_pool") and B.get("usdu_token"):
@@ -104,21 +115,7 @@ def collect(cfg: dict) -> tuple[dict, dict]:
     if m["infinifi_liquid_reserve_pct"] is None and m["infinifi_liquid_reserve"] is not None and m["tvl_infinifi"]:
         m["infinifi_liquid_reserve_pct"] = m["infinifi_liquid_reserve"] / m["tvl_infinifi"] * 100
 
-    # --- Tori: trUSD price (Curve frxUSD/trUSD), DefiLlama coins as fallback --
     if E.get("trusd_token"):
-        try:
-            c = sources.curve_pool_state(eth, E["curve_trusd_pool"], E["trusd_token"], probes.get("trusd", 1000))
-            m["price_trusd"] = c["price"]
-            m["trusd_pool_liquidity"] = c["liquidity_usd"]
-        except Exception as e:
-            errors["curve_trusd"] = f"Curve frxUSD/trUSD: {e}"
-            try:
-                m["price_trusd"] = sources.defillama_coin_price(dl.get("coins_url", "https://coins.llama.fi"),
-                                                                "ethereum", E["trusd_token"], session)
-                errors["curve_trusd"] += " (ціну взято з DefiLlama coins)"
-            except Exception as e2:
-                errors["curve_trusd"] += f"; DefiLlama coins: {e2}"
-
         # --- Tori on-chain: strUSD rate, strUSD share of trUSD, trUSD supply -----
         try:
             t = sources.tori_state(eth, E["trusd_token"], E["strusd_token"])

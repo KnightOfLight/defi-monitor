@@ -99,7 +99,12 @@ sources:
   probe_amounts:
     usdat: 1000
     iusd: 100
-    trusd: 1000             # пул frxUSD/trUSD має ~$60 тис. глибини на ±2% — 1000 ок
+    trusd: 1000
+
+  # Ціну стейбла беремо з пулу, лише якщо в ньому стільки ліквідності; інакше — агрегована ціна DefiLlama
+  # (27.11: пул frxUSD/trUSD спорожнів до $26 тис. і показав $0.886 при ринковій $0.999)
+  min_pool_liquidity_usd:
+    default: 100000
 
   pendle:
     api_url: https://api-v2.pendle.finance/core   # резерв для ринку + пошук нових ринків trUSD

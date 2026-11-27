@@ -207,9 +207,23 @@ def cmd_selftest(args) -> int:
         return f"{'/'.join(c['symbols'])}: ціна USDat {c['price']:.5f}"
     check("Curve USDC/USDat (ціна USDat)", _curve)
 
+    min_liq = src.get("min_pool_liquidity_usd") or {}
+
+    def _which(key, c):
+        need = float(min_liq.get(key, min_liq.get("default", 100_000)))
+        if c["liquidity_usd"] >= need:
+            return " → для тривог: ціна цього пулу"
+        try:
+            p = sources.defillama_coin_price(src["defillama"].get("coins_url", "https://coins.llama.fi"),
+                                             "ethereum", E[f"{key}_token"])
+            return f" → пул тонший за ${need:,.0f}, для тривог: DefiLlama {p:.5f}"
+        except Exception as e:
+            return f" → пул тонший за ${need:,.0f}, DefiLlama недоступна ({e}) — тривоги з ціни пулу з поміткою"
+
     def _curve_iusd():
         c = sources.curve_pool_state(eth, E["curve_iusd_pool"], E["iusd_token"], src["probe_amounts"]["iusd"])
-        return f"{'/'.join(c['symbols'])}: ціна iUSD {c['price']:.5f}, ліквідність ${c['liquidity_usd']:,.0f}"
+        return (f"{'/'.join(c['symbols'])}: ціна iUSD {c['price']:.5f}, ліквідність ${c['liquidity_usd']:,.0f}"
+                + _which("iusd", c))
     check("Curve iUSD/USDC", _curve_iusd)
 
     def _pcs():
@@ -239,7 +253,8 @@ def cmd_selftest(args) -> int:
 
     def _curve_trusd():
         c = sources.curve_pool_state(eth, E["curve_trusd_pool"], E["trusd_token"], src["probe_amounts"].get("trusd", 1000))
-        return f"{'/'.join(c['symbols'])}: ціна trUSD {c['price']:.5f}, ліквідність ${c['liquidity_usd']:,.0f}"
+        return (f"{'/'.join(c['symbols'])}: ціна trUSD {c['price']:.5f}, ліквідність ${c['liquidity_usd']:,.0f}"
+                + _which("trusd", c))
     check("Curve frxUSD/trUSD", _curve_trusd)
 
     def _llama_coin():

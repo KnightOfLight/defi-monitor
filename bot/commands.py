@@ -138,10 +138,12 @@ def status_text(ctx: Ctx) -> str:
         "usdu": f" (PancakeSwap ~{fmt.money(m.get('usdu_pool_liquidity'), 1)})",
         "iusd": f" (пул ~{fmt.money(m.get('curve_iusd_liquidity'), 0)}; курс погашення в протоколі "
                 f"{fmt.price(m.get('iusd_redeem_rate'))})",
-        "trusd": f" (Curve frxUSD/trUSD ~{fmt.money(m.get('trusd_pool_liquidity'), 1)})",
+        "trusd": "",
     }
     for a, name in portfolio.assets(ctx.cfg).items():
-        lines.append(f"{name}: <b>{fmt.price(m.get(f'price_{a}'))}</b> — {lv[f'price_{a}']}{extra.get(a, '')}")
+        src_ = m.get(f"src_{a}")
+        lines.append(f"{name}: <b>{fmt.price(m.get(f'price_{a}'))}</b> — {lv[f'price_{a}']}{extra.get(a, '')}"
+                     + (f"\n  <i>джерело: {esc(src_)}</i>" if src_ and src_.startswith("DefiLlama") else ""))
     lines.append("")
     lines.append("<b>TVL (DefiLlama)</b>")
     for p, name in portfolio.protocols(ctx.cfg).items():

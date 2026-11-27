@@ -1223,5 +1223,53 @@ class TestNoiseFixes1123(unittest.TestCase):
         self.assertFalse(st["alerts"]["sec_tvl_pancakeswap"]["active"])
 
 
+# --------------------------------------------------------------------------
+class TestThinPool1127(unittest.TestCase):
+    """27.11.2026: Curve frxUSD/trUSD спорожнів ($26 тис., 95% trUSD) → $0.886 при ринковій $0.999."""
+
+    def test_thin_pool_falls_back_to_aggregate_price(self):
+        from bot import metrics
+        cfg = load_config()
+        cfg["sources"]["defillama"]["slugs"] = {}
+        cfg["security"]["enabled"] = False
+        saved = {k: getattr(sources, k) for k in ("curve_pool_state", "defillama_coin_price", "tori_state",
+                                                  "pendle_market_state", "infinifi_state")}
+        pools = {cfg["sources"]["ethereum"]["curve_trusd_pool"].lower(): (0.8857, 25_650),
+                 cfg["sources"]["ethereum"]["curve_usdat_pool"].lower(): (0.9997, 6_500_000),
+                 cfg["sources"]["ethereum"]["curve_iusd_pool"].lower(): (1.0001, 8_000)}
+        coin = {"v": 0.9993}
+        try:
+            sources.curve_pool_state = lambda ch, pool, tok, amt: {"price": pools[pool.lower()][0],
+                                                                    "liquidity_usd": pools[pool.lower()][1]}
+
+            def llama(url, chain, token, session=None):
+                if coin["v"] is None:
+                    raise RuntimeError("timeout")
+                return coin["v"]
+            sources.defillama_coin_price = llama
+            for k in ("tori_state", "pendle_market_state", "infinifi_state"):
+                setattr(sources, k, lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("skip")))
+            m, err = metrics.collect(cfg)
+            self.assertEqual(m["price_trusd"], 0.9993)
+            self.assertIn("тонкий", m["src_trusd"])
+            self.assertIn("0.8857", m["src_trusd"])
+            self.assertEqual(m["price_usdat"], 0.9997)                # глибокий пул — його ціна
+            self.assertEqual(m["src_usdat"], "Curve USDC/USDat")
+            self.assertEqual(m["price_iusd"], 0.9993)                 # пул iUSD ~$8 тис. — теж агрегована
+            # DefiLlama недоступна → ціна тонкого пулу з поміткою, а не тиша
+            coin["v"] = None
+            m, err = metrics.collect(cfg)
+            self.assertEqual(m["price_trusd"], 0.8857)
+            self.assertIn("ціна неточна", m["src_trusd"])
+            # алерт показує справжнє джерело
+            st = fresh_state(T0 - timedelta(days=30))
+            eng = alerts.AlertEngine(cfg, st, T0)
+            msgs = eng.run(dict(base_metrics(price_trusd=0.8857), src_trusd=m["src_trusd"]), [], {})
+            self.assertTrue(any("ціна неточна" in x for x in msgs))
+        finally:
+            for k, v in saved.items():
+                setattr(sources, k, v)
+
+
 if __name__ == "__main__":
     unittest.main()
